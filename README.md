@@ -1,8 +1,20 @@
 # create-claude-project
 
 Scaffolds a new project with a minimal reproducible baseline of AI-assisted
-engineering standards, extracted from the setups proven in `mvp-web-v2`,
-`agencymvp.com`, and `fantasy-hof`.
+engineering standards.
+
+## Install
+
+```sh
+git clone <this-repo> && cd create-claude-project
+./install.sh
+```
+
+`install.sh` symlinks `bin/create-claude-project` into `~/.local/bin` (or
+`/usr/local/bin`), tells you if that directory needs adding to your PATH, and
+reports on required dependencies. Everything else is resolved at runtime: the
+command finds a node >= 20 via nvm if your default node is older, and installs
+the `@fission-ai/openspec` CLI globally if missing.
 
 ## Usage
 
@@ -41,19 +53,15 @@ PR. From then on every change follows the cycle:
 
 ## Requirements
 
-- git, and `gh` authenticated (`gh auth login`) for GitHub repo creation
-- node >= 20 on PATH or via nvm (the script finds nvm installs automatically)
+- git, python3 (for the generated Claude hooks)
+- `gh` authenticated (`gh auth login`) for GitHub repo creation; without it,
+  use `--no-github` and push manually later
+- node >= 20 on PATH or via nvm (found automatically)
 - `@fission-ai/openspec` (auto-installed globally if missing)
 
 Note: branch protection on **private** repos requires a paid GitHub plan. If
 protection fails, the local guards still block direct pushes; re-run
 `scripts/protect-main` inside the project after upgrading, or use `--public`.
-
-## Install
-
-```sh
-ln -s "$PWD/bin/create-claude-project" ~/.local/bin/create-claude-project
-```
 
 ## Editing the baseline
 
