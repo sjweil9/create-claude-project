@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Block pushes to main. main only moves via merged pull requests on the remote.
+# Humans can bypass in a genuine emergency with --no-verify; agents may not.
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "BLOCKED: pushing to main is not allowed. Open a pull request instead." >&2
+    exit 1
+  fi
+done
+exit 0

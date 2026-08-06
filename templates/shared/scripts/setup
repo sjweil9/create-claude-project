@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Install this repo's committed git hooks into .git/hooks.
+# Run once after cloning (create-claude-project runs it for you on creation).
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+hooks_dir="$(git rev-parse --git-common-dir)/hooks"
+mkdir -p "$hooks_dir"
+for hook in scripts/git-hooks/*; do
+  cp "$hook" "$hooks_dir/$(basename "$hook")"
+  chmod +x "$hooks_dir/$(basename "$hook")"
+done
+echo "git hooks installed: $(ls scripts/git-hooks | tr '\n' ' ')"

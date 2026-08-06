@@ -1,0 +1,32 @@
+# Rails
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/storage/*
+!/storage/.keep
+/public/assets
+/public/packs
+/node_modules
+/coverage
+*.rbc
+.byebug_history
+
+# Environment / secrets
+.env
+.env.*
+/config/master.key
+/config/credentials/*.key
+
+# Worktrees (each change branch checks out here)
+.worktrees/
+
+# Editor / OS
+.DS_Store
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Claude local state
+.claude/settings.local.json
