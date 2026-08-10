@@ -2,6 +2,7 @@
 name: devops
 description: DevOps specialist for CI/CD, build tooling, environments, and deployment. Use for infrastructure and pipeline work.
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+model: opus
 ---
 
 # DevOps Engineer

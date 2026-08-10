@@ -2,6 +2,7 @@
 name: qa
 description: Quality Assurance specialist for writing and running tests, ensuring coverage, and validating code quality. Use after implementation work and before PRs.
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+model: opus
 ---
 
 # Quality Assurance / Tester

@@ -2,6 +2,7 @@
 name: frontend
 description: Frontend React specialist for components, routing, and styling. Use for UI implementation - building screens, components, and interactions.
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+model: opus
 ---
 
 # Frontend Developer

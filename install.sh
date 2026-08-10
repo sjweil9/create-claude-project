@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Installs the create-claude-project command by symlinking it into a PATH
-# directory. Safe to re-run; run from anywhere.
+# Installs the create-claude-project and add-claude-scaffolding commands by
+# symlinking them into a PATH directory. Safe to re-run; run from anywhere.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN="$ROOT/bin/create-claude-project"
-[ -f "$BIN" ] || { echo "error: $BIN not found" >&2; exit 1; }
-chmod +x "$BIN"
 
 # Pick an install dir: prefer ~/.local/bin, else /usr/local/bin if writable.
 INSTALL_DIR="$HOME/.local/bin"
@@ -14,8 +11,14 @@ if [ ! -d "$INSTALL_DIR" ] && [ -w /usr/local/bin ]; then
   INSTALL_DIR=/usr/local/bin
 fi
 mkdir -p "$INSTALL_DIR"
-ln -sf "$BIN" "$INSTALL_DIR/create-claude-project"
-echo "installed: $INSTALL_DIR/create-claude-project -> $BIN"
+
+for cmd in create-claude-project add-claude-scaffolding; do
+  BIN="$ROOT/bin/$cmd"
+  [ -f "$BIN" ] || { echo "error: $BIN not found" >&2; exit 1; }
+  chmod +x "$BIN"
+  ln -sf "$BIN" "$INSTALL_DIR/$cmd"
+  echo "installed: $INSTALL_DIR/$cmd -> $BIN"
+done
 
 # PATH check
 case ":$PATH:" in
@@ -66,4 +69,4 @@ else
 fi
 
 echo ""
-echo "Done. Try: create-claude-project --help"
+echo "Done. Try: create-claude-project --help  |  add-claude-scaffolding --help"

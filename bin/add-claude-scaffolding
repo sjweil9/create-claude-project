@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+#
+# add-claude-scaffolding [react|rails] [--no-github]
+#
+# Adds the AI-assisted engineering baseline to an EXISTING project in the
+# current directory: lean CLAUDE.md, specialist subagents, enforcement hooks
+# (no direct work on main, worktree-per-change), OpenSpec workflow, and the
+# project-onboarding skill (first claude session infers the stack from the
+# code, confirms with you, and authors the docs).
+#
+# Never overwrites existing files: conflicts are skipped and reported;
+# .gitignore and CLAUDE.md are append-merged. Everything lands on a
+# change/claude-scaffolding branch for you to review and merge.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: add-claude-scaffolding [type] [options]
+
+  type      react | rails (optional — auto-detected from Gemfile/package.json)
+
+Options:
+  --no-github   Skip GitHub branch protection setup
+  -h, --help    Show this help
+
+Run from the root of an existing git repository with a clean working tree.
+The scaffolding is committed on a change/claude-scaffolding branch; after
+merging it, run `claude` — the first session runs a codebase-aware onboarding
+interview and populates the project docs.
+EOF
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+warn() { echo "warning: $*" >&2; }
+
+TYPE="" USE_GITHUB=1
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    --no-github) USE_GITHUB=0 ;;
+    -*) die "unknown option: $arg" ;;
+    *) if [ -z "$TYPE" ]; then TYPE="$arg"; else die "unexpected argument: $arg"; fi ;;
+  esac
+done
+[ -z "$TYPE" ] || case "$TYPE" in react|rails) ;; *) die "type must be 'react' or 'rails', got '$TYPE'" ;; esac
+
+TARGET="$PWD"
+NAME="$(basename "$TARGET")"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve through the symlink so templates/ is found next to the real script.
+REAL_SCRIPT="${BASH_SOURCE[0]}"
+if [ -L "$REAL_SCRIPT" ]; then REAL_SCRIPT="$(readlink "$REAL_SCRIPT")"; case "$REAL_SCRIPT" in /*) ;; *) REAL_SCRIPT="$SCRIPT_DIR/$REAL_SCRIPT" ;; esac; fi
+ROOT="$(cd "$(dirname "$REAL_SCRIPT")/.." && pwd)"
+TEMPLATES="$ROOT/templates"
+[ -d "$TEMPLATES/shared" ] && [ -d "$TEMPLATES/add" ] || die "templates not found under $ROOT/templates"
+
+# --- Preconditions: existing repo, at root, clean tree ----------------------
+git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository. Run 'git init' and commit your project first."
+[ "$(git rev-parse --show-toplevel)" = "$TARGET" ] || die "run from the repository root: $(git rev-parse --show-toplevel)"
+git rev-parse HEAD >/dev/null 2>&1 || die "repository has no commits yet. Commit your project first."
+[ -z "$(git status --porcelain)" ] || die "working tree is not clean. Commit or stash your changes first."
+git rev-parse --verify --quiet change/claude-scaffolding >/dev/null && die "branch change/claude-scaffolding already exists — was scaffolding already added?"
+
+# --- Type auto-detection ----------------------------------------------------
+if [ -z "$TYPE" ]; then
+  is_rails=0 is_react=0
+  [ -f Gemfile ] && grep -q "rails" Gemfile && is_rails=1
+  [ -f package.json ] && grep -q '"react"' package.json && is_react=1
+  if [ "$is_rails" = 1 ] && [ "$is_react" = 0 ]; then TYPE=rails
+  elif [ "$is_react" = 1 ] && [ "$is_rails" = 0 ]; then TYPE=react
+  elif [ "$is_rails" = 1 ] && [ "$is_react" = 1 ]; then
+    die "both Rails and React detected — pass the type explicitly: add-claude-scaffolding <react|rails>"
+  else
+    die "could not detect project type — pass it explicitly: add-claude-scaffolding <react|rails>"
+  fi
+  echo "Detected project type: $TYPE"
+fi
+[ -d "$TEMPLATES/$TYPE" ] || die "templates not found under $TEMPLATES/$TYPE"
+
+# --- Node >= 20 (needed by the openspec CLI) --------------------------------
+node_ok() { command -v node >/dev/null 2>&1 && node -e 'process.exit(+process.versions.node.split(".")[0]>=20?0:1)' 2>/dev/null; }
+if ! node_ok; then
+  best=""
+  for d in "$HOME"/.nvm/versions/node/v*/bin; do
+    [ -x "$d/node" ] || continue
+    "$d/node" -e 'process.exit(+process.versions.node.split(".")[0]>=20?0:1)' 2>/dev/null && best="$d"
+  done
+  [ -n "$best" ] && PATH="$best:$PATH"
+fi
+node_ok || die "node >= 20 is required (for the openspec CLI). Install one, e.g.: nvm install 20"
+
+# --- openspec CLI ------------------------------------------------------------
+if ! command -v openspec >/dev/null 2>&1; then
+  echo "openspec CLI not found; installing @fission-ai/openspec globally..."
+  npm install -g @fission-ai/openspec >/dev/null 2>&1 || die "failed to install @fission-ai/openspec"
+fi
+
+# --- Scaffold onto the branch ------------------------------------------------
+echo "Adding Claude scaffolding to $NAME ($TYPE) on branch change/claude-scaffolding ..."
+git switch -c change/claude-scaffolding -q
+
+COPIED=() SKIPPED=()
+
+# Copy a template tree into the repo without overwriting anything.
+# gitignore and CLAUDE.md conflicts are append-merged instead of skipped.
+copy_tree() {
+  local src="$1" rel dest
+  while IFS= read -r -d '' f; do
+    rel="${f#"$src"/}"
+    dest="$TARGET/$rel"
+    [ "$rel" = "gitignore" ] && dest="$TARGET/.gitignore"
+    if [ ! -e "$dest" ]; then
+      mkdir -p "$(dirname "$dest")"
+      cp "$f" "$dest"
+      COPIED+=("$dest")
+    elif [ "$rel" = "gitignore" ]; then
+      merge_gitignore "$f"
+    elif [ "$rel" = "CLAUDE.md" ]; then
+      merge_claude_md "$f"
+    else
+      SKIPPED+=("$rel")
+    fi
+  done < <(find "$src" -type f -print0)
+}
+
+# Append template gitignore lines the existing .gitignore doesn't have.
+merge_gitignore() {
+  local tmpl="$1" line added=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in \#*) continue ;; esac
+    grep -qxF "$line" "$TARGET/.gitignore" && continue
+    if [ "$added" = 0 ]; then
+      printf '\n# --- added by add-claude-scaffolding ---\n' >>"$TARGET/.gitignore"
+      added=1
+    fi
+    printf '%s\n' "$line" >>"$TARGET/.gitignore"
+  done <"$tmpl"
+  [ "$added" = 1 ] && COPIED+=("$TARGET/.gitignore")
+  return 0
+}
+
+# Append the scaffold CLAUDE.md below a marker; the project-onboarding
+# session reconciles the two halves into one coherent file.
+merge_claude_md() {
+  local tmpl="$1"
+  {
+    printf '\n\n<!-- Appended by add-claude-scaffolding. The project-onboarding session merges this with the content above into one coherent CLAUDE.md. -->\n\n'
+    cat "$tmpl"
+  } >>"$TARGET/CLAUDE.md"
+  COPIED+=("$TARGET/CLAUDE.md")
+}
+
+copy_tree "$TEMPLATES/shared"
+copy_tree "$TEMPLATES/$TYPE"
+copy_tree "$TEMPLATES/add"    # add-mode extras (codebase-aware onboarding skill)
+
+# Template substitution — only in files this script touched.
+if [ "${#COPIED[@]}" -gt 0 ]; then
+  printf '%s\0' "${COPIED[@]}" \
+    | xargs -0 perl -pi -e "s/\\{\\{PROJECT_NAME\\}\\}/$NAME/g; s/\\{\\{PROJECT_TYPE\\}\\}/$TYPE/g; s/\\{\\{BOOTSTRAP_SKILL\\}\\}/project-onboarding/g"
+fi
+
+chmod +x "$TARGET"/scripts/setup "$TARGET"/scripts/protect-main \
+  "$TARGET"/scripts/git-hooks/* "$TARGET"/scripts/claude-hooks/*.sh
+
+# --- OpenSpec init (generates /opsx:* commands + openspec-* skills) ----------
+if [ -d "$TARGET/openspec" ]; then
+  echo "openspec/ already exists; skipping openspec init."
+  OPENSPEC_STATE="pre-existing (left untouched)"
+else
+  echo "Initializing OpenSpec ..."
+  openspec init --tools claude --no-animation >/dev/null
+  OPENSPEC_STATE="initialized (/opsx:explore, propose, apply, archive, sync, update)"
+fi
+
+git add -A
+git commit -q -m "Add AI-engineering baseline (add-claude-scaffolding: $TYPE)"
+
+GUARDS_OK=1
+if [ "${#SKIPPED[@]}" -gt 0 ]; then
+  warn "these scaffold files already existed and were left untouched:"
+  for f in "${SKIPPED[@]}"; do
+    echo "  - $f" >&2
+    case "$f" in scripts/setup|scripts/git-hooks/*|scripts/claude-hooks/*|.claude/settings.json) GUARDS_OK=0 ;; esac
+  done
+  warn "compare them against $TEMPLATES manually if you want the scaffold versions."
+  [ "$GUARDS_OK" = 0 ] && warn "some enforcement files were among them — the git/Claude guards may be incomplete until you merge those by hand."
+fi
+
+# --- GitHub branch protection ------------------------------------------------
+PROTECTED=0
+if [ "$USE_GITHUB" = 1 ] && git remote get-url origin >/dev/null 2>&1; then
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    if "$TARGET"/scripts/protect-main; then
+      PROTECTED=1
+    else
+      warn "could not enable branch protection (private repos need GitHub Pro)."
+      warn "Local guards still block direct pushes to main. Re-run scripts/protect-main later."
+    fi
+  else
+    warn "gh CLI missing or not authenticated (run: gh auth login); skipping branch protection."
+    warn "Later: run scripts/protect-main."
+  fi
+fi
+
+# Local git hooks last, so the scaffold's own commit above is not blocked.
+# Only run setup if it is OUR setup script (not a pre-existing one we skipped).
+GUARDS_MSG="git hooks + Claude hooks installed (no commits/merges/pushes on main; worktree per change)"
+if [ "$GUARDS_OK" = 1 ]; then
+  "$TARGET"/scripts/setup >/dev/null
+else
+  GUARDS_MSG="NOT fully installed — merge the pre-existing enforcement files listed above, then run scripts/setup"
+fi
+
+cat <<EOF
+
+Done: scaffolding committed on branch change/claude-scaffolding
+  type:              $TYPE
+  openspec:          $OPENSPEC_STATE
+  local guards:      $GUARDS_MSG
+  branch protection: $(if [ "$PROTECTED" = 1 ]; then echo "enabled (PRs required on main)"; elif [ "$USE_GITHUB" = 0 ]; then echo "skipped (--no-github)"; else echo "NOT enabled — see warnings above"; fi)
+
+Next steps:
+  # review the scaffolding, then land it:
+  git push -u origin change/claude-scaffolding && gh pr create   # PR flow
+  # (or, without a remote: git switch main && git merge --ff-only change/claude-scaffolding)
+
+  claude          # first session runs the project-onboarding skill: it reads the
+                  # codebase, confirms its inferences with you, and populates docs/.
+                  # From then on: /opsx:explore -> /opsx:propose -> worktree + /opsx:apply -> review -> PR -> merge -> /opsx:archive
+EOF

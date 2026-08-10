@@ -2,6 +2,7 @@
 name: frontend
 description: Frontend Rails specialist for views, Hotwire (Turbo/Stimulus), and styling. Use for UI implementation.
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+model: opus
 ---
 
 # Frontend Developer

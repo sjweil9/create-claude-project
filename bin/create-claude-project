@@ -82,11 +82,12 @@ git init -q -b main 2>/dev/null || { git init -q && git symbolic-ref HEAD refs/h
 
 cp -R "$TEMPLATES/shared/." "$TARGET/"
 cp -R "$TEMPLATES/$TYPE/." "$TARGET/"
+cp -R "$TEMPLATES/create/." "$TARGET/"   # create-mode extras (greenfield interview skill)
 [ -f "$TARGET/gitignore" ] && mv "$TARGET/gitignore" "$TARGET/.gitignore"
 
 # Template substitution
 find "$TARGET" -type f -not -path "$TARGET/.git/*" -print0 \
-  | xargs -0 perl -pi -e "s/\\{\\{PROJECT_NAME\\}\\}/$NAME/g; s/\\{\\{PROJECT_TYPE\\}\\}/$TYPE/g"
+  | xargs -0 perl -pi -e "s/\\{\\{PROJECT_NAME\\}\\}/$NAME/g; s/\\{\\{PROJECT_TYPE\\}\\}/$TYPE/g; s/\\{\\{BOOTSTRAP_SKILL\\}\\}/project-interview/g"
 
 chmod +x "$TARGET"/scripts/setup "$TARGET"/scripts/protect-main \
   "$TARGET"/scripts/git-hooks/* "$TARGET"/scripts/claude-hooks/*.sh

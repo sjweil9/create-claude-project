@@ -2,6 +2,7 @@
 name: state
 description: Data-layer specialist for stores, API client, and data fetching. Use for implementing state management, server communication, and caching.
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+model: opus
 ---
 
 # State / Data-Layer Developer

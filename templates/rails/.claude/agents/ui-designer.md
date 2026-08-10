@@ -2,6 +2,7 @@
 name: ui-designer
 description: UI/UX design specialist for layout, component structure, user flows, and visual consistency. Use before implementing significant new UI.
 tools: ["Read", "Write", "Edit", "Grep", "Glob"]
+model: opus
 ---
 
 # UI/UX Designer

@@ -3,8 +3,8 @@
 ## Project
 
 Rails application. **Not yet initialized** — if `docs/overview.md` does not
-exist, invoke the `project-interview` skill before any other work. (The
-interview replaces this section with a real project description.)
+exist, invoke the `{{BOOTSTRAP_SKILL}}` skill before any other work. (That
+first session replaces this section with a real project description.)
 
 ## Key Docs
 

@@ -2,6 +2,7 @@
 name: backend
 description: Backend Rails specialist for controllers, service objects, presenters, serializers, jobs, and application logic. Use for implementing server-side behavior.
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+model: opus
 ---
 
 # Backend Developer

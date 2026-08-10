@@ -51,15 +51,19 @@ Cover these areas, adapting depth to the answers:
 
 On the `change/project-init` branch, write (see `docs/README.md` for the doc map):
 
-1. `docs/overview.md`, `docs/architecture.md`, `docs/code-standards.md`,
-   `docs/testing.md`, `docs/deployment.md`, `docs/ui-patterns.md`
+1. Author `docs/overview.md`, `docs/architecture.md`, `docs/deployment.md`
    (+ `docs/schema.md` for rails). Record decisions **with their why**; mark
    defaulted decisions `(defaulted)`.
-2. `openspec/config.yaml` — fill the `context:` block with a tight summary of
+2. Review the pre-populated `docs/code-standards.md`, `docs/testing.md`, and
+   `docs/ui-patterns.md` against the interview answers: fill in chosen
+   versions, adjust anything the owner overrode (framework swaps, coverage
+   bar, accessibility target), and record project-specific additions. Do not
+   rewrite what still applies.
+3. `openspec/config.yaml` — fill the `context:` block with a tight summary of
    stack, conventions, and domain (this is injected into every OpenSpec artifact).
-3. `CLAUDE.md` — replace the "Project" placeholder section with a 3-5 line real
+4. `CLAUDE.md` — replace the "Project" placeholder section with a 3-5 line real
    description. Do not grow CLAUDE.md beyond that; detail belongs in docs/.
-4. If any answer changes agent boundaries (e.g. no database), note it in the
+5. If any answer changes agent boundaries (e.g. no database), note it in the
    relevant `.claude/agents/*.md` file.
 
 ## Step 3 — Land it
