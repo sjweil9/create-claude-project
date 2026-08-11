@@ -26,6 +26,16 @@ this doc (framework swaps like RSpec, coverage targets, system tests).
   rendered content), not on internal calls, wherever possible
 - Never weaken assertions or delete tests to get green — surface the tradeoff
 
+## Browser Smoke Tests
+
+- Every UI-affecting change gets a **browser smoke test** in addition to
+  unit/integration tests: the qa agent loads the `webapp-testing` skill and
+  drives the running Rails server with headless Playwright (screenshots, no
+  console errors, primary interaction works)
+- Smoke tests are a completion gate, not an optional extra; if one is
+  impossible, the reason is reported explicitly
+- Durable smoke flows graduate into system tests (Capybara) so they run in CI
+
 ## External Interactions
 
 - **All external requests must be stubbed** with WebMock

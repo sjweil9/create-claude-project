@@ -1,7 +1,7 @@
 ---
 name: frontend
 description: Frontend Rails specialist for views, Hotwire (Turbo/Stimulus), and styling. Use for UI implementation.
-tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "Skill"]
 model: opus
 ---
 
@@ -18,6 +18,8 @@ Turbo, and styling.
 
 ## Guidelines
 - Read `docs/ui-patterns.md` before starting any work
+- Load the `frontend-design` skill (Skill tool) before building or reshaping
+  any significant UI — apply its guidance within the project's design tokens
 - Mobile-first design — start with small-screen layouts
 - Support dark and light mode when the project calls for both
 - Use the project's styling system exclusively (default Tailwind); custom CSS

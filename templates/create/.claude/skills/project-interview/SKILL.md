@@ -1,6 +1,6 @@
 ---
 name: project-interview
-description: First-session bootstrap. Use IMMEDIATELY when docs/overview.md does not exist - this project has been scaffolded but not yet initialized. Interviews the owner about goals and stack, then authors the docs/ knowledge base, fills openspec/config.yaml context, and updates CLAUDE.md - all landed via PR.
+description: First-session bootstrap. Use IMMEDIATELY when docs/overview.md does not exist - this project has been scaffolded but not yet initialized. Interviews the owner about goals and stack, then authors the docs/ knowledge base, fills openspec/config.yaml context, and updates CLAUDE.md - landed via PR (or presented uncommitted for owner review when the repo has no remote).
 ---
 
 # Project Interview
@@ -68,8 +68,13 @@ On the `change/project-init` branch, write (see `docs/README.md` for the doc map
 
 ## Step 3 — Land it
 
-1. Commit, push the branch, open a PR (`gh pr create`) summarizing the
-   decisions made and any defaults taken. The owner merges.
+1. How to land depends on whether the repo has a remote (`git remote`):
+   - **Remote configured**: commit, push the branch, open a PR
+     (`gh pr create`) summarizing the decisions made and any defaults taken.
+     The owner merges.
+   - **No remote (local-only)**: do NOT commit (hooks block it). Leave the
+     changes uncommitted on the branch and present the same summary of
+     decisions and files written; the owner reviews, commits, and merges.
 2. Tell the owner the next step: after merging, the first real change is
    scaffolding the app itself — start with `/opsx:propose "scaffold the
    application"`, which flows through the standard cycle

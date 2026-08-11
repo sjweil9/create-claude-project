@@ -22,10 +22,13 @@ the `@fission-ai/openspec` CLI globally if missing.
 ### New project
 
 ```sh
-create-claude-project <react|rails> <project-name> [--public] [--no-github]
+create-claude-project <react|rails> <project-name> [--github] [--public]
 ```
 
-Creates `./<project-name>` in the current directory. Then:
+Creates `./<project-name>` in the current directory as a **local-only git
+repo by default** — no remote is created. Pass `--github` to also create a
+GitHub repo (private unless `--public`), push main, and enable branch
+protection. Then:
 
 ```sh
 cd <project-name>
@@ -66,17 +69,32 @@ From then on every change follows the cycle:
 
 ```
 /opsx:explore → /opsx:propose → approve → worktree + /opsx:apply
-             → review (code-reviewer/security-reviewer) → PR → owner merges → /opsx:archive
+             → adversarial review (code-reviewer/security-reviewer) + browser smoke test (qa)
+             → land → owner merges → /opsx:archive
 ```
+
+## Commit policy: two modes
+
+The repo is always initialized locally; a GitHub remote only exists if you
+opt in (`--github` on create, or a remote the existing project already has).
+How a change lands is detected at runtime from `git remote`:
+
+- **Remote configured (PR flow)** — Claude commits on `change/*` branches,
+  pushes, and opens a PR; you merge. Main only moves via PRs.
+- **Local-only (no remote)** — Claude **never runs `git commit`** (enforced
+  by `bash-guard.sh`). It leaves the finished change uncommitted in its
+  worktree and presents a summary; you review, commit, and merge. Adding a
+  remote later automatically switches the project to the PR flow.
 
 ## What gets generated
 
 | Layer | Mechanism |
 |-------|-----------|
-| Lean CLAUDE.md | Orchestrator role, agent routing table, workflow rules; detail lives in `docs/` and agent files |
-| Specialist agents | `.claude/agents/` — planner, architect, code-reviewer, security-reviewer, qa, devops, ui-designer, refactor-cleaner + type-specific implementers (react: frontend, state; rails: backend, frontend, database-reviewer). Each has scope, guidelines, and explicit boundaries/handoffs. |
+| Lean CLAUDE.md | Orchestrator role, agent routing table, workflow rules; detail lives in `docs/` and agent files. Standing guardrails: ask for clarification instead of assuming; never assume data shapes/APIs without samples or a real endpoint (stop and ask); escalate after 2 failed attempts (stop, analyze, change approach); no task is complete without an adversarial code review. |
+| Specialist agents | `.claude/agents/` — planner, architect, code-reviewer (adversarial: its job is to find reasons the change is NOT done), security-reviewer, qa, devops, ui-designer, refactor-cleaner + type-specific implementers (react: frontend, state; rails: backend, frontend, database-reviewer). Each has scope, guidelines, and explicit boundaries/handoffs. |
+| Vendored skills | `.claude/skills/` — Anthropic's `frontend-design` (loaded by frontend/ui-designer agents before significant UI work) and `webapp-testing` (loaded by qa to run headless-Playwright browser smoke tests, required for every UI-affecting change). |
 | OpenSpec | `openspec init --tools claude` → `/opsx:*` commands + skills; spec-driven change workflow |
-| No direct work on main | Three independent layers: (1) GitHub branch protection (PRs required, no force pushes), (2) committed git hooks (`pre-commit`, `pre-push` block main), (3) Claude hooks — `bash-guard.sh` blocks push/commit/merge to main and `--no-verify`; `file-guard.sh` blocks file edits in any checkout on main, forcing worktrees |
+| No direct work on main | Three independent layers: (1) GitHub branch protection (PRs required, no force pushes), (2) committed git hooks (`pre-commit`, `pre-push` block main), (3) Claude hooks — `bash-guard.sh` blocks push/commit/merge to main, `--no-verify`, and **any** `git commit` when the repo has no remote (local-only mode); `file-guard.sh` blocks file edits in any checkout on main, forcing worktrees |
 | Worktree per change | `git worktree add .worktrees/<change-id> -b change/<change-id>`; parallel subagents use Agent-tool worktree isolation |
 | Quality gates | Stop hook: session cannot end with failing lint/typecheck (rubocop for rails); PostToolUse hook: any `git merge`/`git pull` triggers full lint+build+test. Both auto-detect project type and no-op until the app is scaffolded. |
 | First-run bootstrap | Triggered by missing `docs/overview.md`: `.claude/skills/project-interview/` (new projects) or `.claude/skills/project-onboarding/` (existing codebases — infers from code, confirms, then documents) |
@@ -85,8 +103,8 @@ From then on every change follows the cycle:
 ## Requirements
 
 - git, python3 (for the generated Claude hooks)
-- `gh` authenticated (`gh auth login`) for GitHub repo creation; without it,
-  use `--no-github` and push manually later
+- `gh` authenticated (`gh auth login`) — only needed with `--github` (or for
+  branch protection in add mode when a remote exists)
 - node >= 20 on PATH or via nvm (found automatically)
 - `@fission-ai/openspec` (auto-installed globally if missing)
 
@@ -98,7 +116,8 @@ protection fails, the local guards still block direct pushes; re-run
 
 Templates live in `templates/`:
 - `templates/shared/` — hooks, settings, docs scaffold (pre-populated
-  ui-patterns baseline), shared agents
+  ui-patterns baseline), shared agents, vendored skills (`frontend-design`,
+  `webapp-testing` from [anthropics/skills](https://github.com/anthropics/skills))
 - `templates/react/`, `templates/rails/` — CLAUDE.md, gitignore, type-specific
   agents, pre-populated code-standards/testing baselines
 - `templates/create/` — greenfield-only extras (project-interview skill)

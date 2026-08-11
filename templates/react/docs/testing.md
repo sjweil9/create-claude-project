@@ -26,6 +26,16 @@ this doc (framework swaps, coverage targets, whether e2e is configured).
 - Never weaken assertions or delete tests to get green — surface the tradeoff
 - Vitest does not typecheck — `tsc -b` green is a separate gate
 
+## Browser Smoke Tests
+
+- Every UI-affecting change gets a **browser smoke test** in addition to
+  unit/component tests: the qa agent loads the `webapp-testing` skill and
+  drives the running dev server with headless Playwright (screenshots, no
+  console errors, primary interaction works)
+- Smoke tests are a completion gate, not an optional extra; if one is
+  impossible, the reason is reported explicitly
+- Durable smoke flows graduate into the Playwright e2e suite
+
 ## External Interactions
 
 - **All network requests must be stubbed** with MSW — never hit real APIs in

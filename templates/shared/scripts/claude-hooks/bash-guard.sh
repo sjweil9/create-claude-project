@@ -22,6 +22,14 @@ if [[ "$cmd" =~ git[[:space:]].*push ]]; then
   fi
 fi
 
+# Local-only mode (no git remote): the owner reviews, commits, and merges.
+# Agents never commit — leave changes in the worktree for the owner.
+if [[ "$cmd" =~ git[[:space:]].*(commit|merge|cherry-pick|rebase)([[:space:]]|$) ]]; then
+  if ! git -C "${CLAUDE_PROJECT_DIR:-.}" remote 2>/dev/null | grep -q .; then
+    block "no git remote configured (local-only mode): agents never commit. Leave the changes uncommitted in the worktree and present them; the owner reviews, commits, and merges."
+  fi
+fi
+
 # Committing or merging while checked out on main: never.
 if [ "$branch" = "main" ]; then
   if [[ "$cmd" =~ git[[:space:]].*(commit|merge|cherry-pick|rebase) ]]; then

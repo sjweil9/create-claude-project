@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# create-claude-project <react|rails> <project-name> [--public] [--no-github]
+# create-claude-project <react|rails> <project-name> [--github] [--public]
 #
 # Scaffolds a new project directory with the AI-assisted engineering baseline:
 # lean CLAUDE.md, specialist subagents, enforcement hooks (no direct work on
@@ -17,8 +17,10 @@ Usage: create-claude-project <type> <name> [options]
             (e.g. my-app, my_app)
 
 Options:
-  --public      Create the GitHub repo public (default: private)
-  --no-github   Skip GitHub repo creation and branch protection
+  --github      Also create a GitHub repo, push main, and enable branch
+                protection (default: local-only, no remote — Claude never
+                commits; you review, commit, and merge)
+  --public      With --github: create the repo public (default: private)
   -h, --help    Show this help
 
 The new project is created as ./<name> inside the current directory.
@@ -30,17 +32,18 @@ EOF
 die() { echo "error: $*" >&2; exit 1; }
 warn() { echo "warning: $*" >&2; }
 
-TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=1
+TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=0
 for arg in "$@"; do
   case "$arg" in
     -h|--help) usage; exit 0 ;;
+    --github) USE_GITHUB=1 ;;
     --public) VISIBILITY="--public" ;;
-    --no-github) USE_GITHUB=0 ;;
     -*) die "unknown option: $arg" ;;
     *) if [ -z "$TYPE" ]; then TYPE="$arg"; elif [ -z "$NAME" ]; then NAME="$arg"; else die "unexpected argument: $arg"; fi ;;
   esac
 done
 
+[ "$VISIBILITY" = "--public" ] && [ "$USE_GITHUB" = 0 ] && warn "--public has no effect without --github"
 [ -n "$TYPE" ] && [ -n "$NAME" ] || { usage; exit 1; }
 case "$TYPE" in react|rails) ;; *) die "type must be 'react' or 'rails', got '$TYPE'" ;; esac
 [[ "$NAME" =~ ^[a-z0-9]+([-_][a-z0-9]+)*$ ]] || die "invalid name '$NAME' (lowercase letters/digits, - or _ separated)"
@@ -130,11 +133,17 @@ Done: $TARGET
   type:              $TYPE
   openspec:          initialized (/opsx:explore, propose, apply, archive, sync, update)
   local guards:      git hooks + Claude hooks installed (no commits/merges/pushes on main; worktree per change)
-  branch protection: $(if [ "$PROTECTED" = 1 ]; then echo "enabled (PRs required on main)"; elif [ "$USE_GITHUB" = 0 ]; then echo "skipped (--no-github) — run scripts/protect-main after pushing to GitHub"; else echo "NOT enabled — see warnings above"; fi)
+  branch protection: $(if [ "$PROTECTED" = 1 ]; then echo "enabled (PRs required on main)"; elif [ "$USE_GITHUB" = 0 ]; then echo "n/a (local-only — re-run with --github, or add a remote later and run scripts/protect-main)"; else echo "NOT enabled — see warnings above"; fi)
+
+Commit policy (detected at runtime from 'git remote'):
+  with a remote:    Claude commits on change/* branches and opens PRs; you merge.
+  local-only:       Claude NEVER commits (hook-enforced) — it leaves changes in
+                    the worktree for you to review, commit, and merge.
+                    Adding a remote later switches the project to the PR flow.
 
 Next steps:
   cd $NAME
   claude          # first session runs the project-interview skill to gather
                   # requirements and populate docs/, then the OpenSpec cycle begins:
-                  # /opsx:explore -> /opsx:propose -> worktree + /opsx:apply -> review -> PR -> merge -> /opsx:archive
+                  # /opsx:explore -> /opsx:propose -> worktree + /opsx:apply -> review -> PR/owner-commit -> merge -> /opsx:archive
 EOF

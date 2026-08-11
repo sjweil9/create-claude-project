@@ -1,7 +1,7 @@
 ---
 name: frontend
 description: Frontend React specialist for components, routing, and styling. Use for UI implementation - building screens, components, and interactions.
-tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "Skill"]
 model: opus
 ---
 
@@ -18,6 +18,8 @@ styling, and user interactions.
 
 ## Guidelines
 - Read `docs/ui-patterns.md` and `docs/code-standards.md` before starting any work
+- Load the `frontend-design` skill (Skill tool) before building or reshaping
+  any significant UI — apply its guidance within the project's design tokens
 - Build complex UI from small composable components; extract shared UI into
   reusable components once a third consumer exists — not before
 - Keep components presentational — data fetching and business logic live in

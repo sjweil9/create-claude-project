@@ -1,6 +1,6 @@
 ---
 name: project-onboarding
-description: First-session bootstrap for an existing codebase. Use IMMEDIATELY when docs/overview.md does not exist - Claude scaffolding was added to this pre-existing project but it has not been onboarded yet. Investigates the codebase, confirms inferences with the owner, then authors the docs/ knowledge base, fills openspec/config.yaml context, and reconciles CLAUDE.md - all landed via PR.
+description: First-session bootstrap for an existing codebase. Use IMMEDIATELY when docs/overview.md does not exist - Claude scaffolding was added to this pre-existing project but it has not been onboarded yet. Investigates the codebase, confirms inferences with the owner, then authors the docs/ knowledge base, fills openspec/config.yaml context, and reconciles CLAUDE.md - landed via PR (or presented uncommitted for owner review when the repo has no remote).
 ---
 
 # Project Onboarding
@@ -93,9 +93,13 @@ On the `change/project-init` branch (see `docs/README.md` for the doc map):
 
 ## Step 4 — Land it
 
-1. Commit, push the branch, open a PR (`gh pr create`) summarizing what was
-   inferred, what the owner corrected, and any defaults taken. The owner
-   merges.
+1. How to land depends on whether the repo has a remote (`git remote`):
+   - **Remote configured**: commit, push the branch, open a PR
+     (`gh pr create`) summarizing what was inferred, what the owner
+     corrected, and any defaults taken. The owner merges.
+   - **No remote (local-only)**: do NOT commit (hooks block it). Leave the
+     changes uncommitted on the branch and present the same summary; the
+     owner reviews, commits, and merges.
 2. Tell the owner the next step: from now on every non-trivial change flows
    through the OpenSpec cycle
    (`/opsx:explore` → `/opsx:propose` → approve → worktree + `/opsx:apply`

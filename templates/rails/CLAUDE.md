@@ -17,10 +17,30 @@ full map: `overview.md`, `architecture.md`, `schema.md`, `code-standards.md`,
 - You are an orchestrator. Never implement non-trivial tasks yourself — break
   them into components and delegate to the subagents in `.claude/agents`.
 - Read the relevant docs before starting any feature work.
-- Always consult the code-reviewer agent on completed work before presenting it.
-- Before declaring any task complete: rubocop and tests must be green.
+- **Ask, don't assume.** If requirements or inputs are unclear or ambiguous,
+  ask the owner for clarification instead of picking an interpretation.
+- **Never assume data.** Never guess data shapes, external API behavior, or
+  file formats. Get representative samples or exercise the real endpoint; if
+  you cannot, stop and ask the owner to provide what you need before proceeding.
+- **Escalate after 2 failures.** If the same approach fails twice, stop —
+  do not retry a third time. Analyze why it failed, then try a materially
+  different approach; if that also fails, present your findings to the owner.
+- **No task is complete without an adversarial code review.** The
+  code-reviewer agent must review the work (with instructions to actively try
+  to find reasons it is NOT done) and its findings must be addressed before
+  you present or mark anything complete.
+- Before declaring any task complete: rubocop and tests must be green, and
+  any UI-affecting change needs a browser smoke test (qa agent,
+  `webapp-testing` skill) in addition to unit tests.
 - After any correction from the user: save it as a `feedback` memory with the
   why, so the same mistake does not recur.
+
+## Skills subagents must use
+
+- `frontend-design` — frontend and ui-designer agents load this before
+  designing or implementing any significant UI.
+- `webapp-testing` — qa agent loads this to run Playwright browser smoke
+  tests against the locally running app.
 
 ## Workflow: OpenSpec cycle (non-negotiable)
 
@@ -35,18 +55,27 @@ Non-trivial work flows through OpenSpec. The cycle for every change:
    doing parallel implementation work get their own worktrees
    (Agent tool `isolation: "worktree"`).
 5. `/opsx:apply` — work through tasks in the worktree.
-6. Review — code-reviewer agent (plus security-reviewer for auth/input/data
-   changes, database-reviewer for migrations) on the full diff. Fix findings.
-7. PR — push the branch, `gh pr create`. **A session finishes by leaving an
-   open PR, not a merged change.** The owner merges. Do not merge your own PR
-   unless the owner explicitly asks.
-8. `/opsx:archive` — after merge, archive the change (also lands via PR), then
-   remove the worktree.
+6. Review — adversarial code review by the code-reviewer agent (plus
+   security-reviewer for auth/input/data changes, database-reviewer for
+   migrations) on the full diff; qa runs a browser smoke test for
+   UI-affecting changes. Fix findings before landing.
+7. Land it — depends on whether the repo has a git remote (`git remote`):
+   - **Remote configured (PR flow)**: commit on the `change/*` branch, push,
+     `gh pr create`. **A session finishes by leaving an open PR, not a merged
+     change.** The owner merges. Do not merge your own PR unless the owner
+     explicitly asks.
+   - **No remote (local-only)**: **never run `git commit`** (hooks block it).
+     Leave the changes uncommitted in the worktree and present a summary of
+     files changed and decisions made; the owner reviews, commits, and merges.
+8. `/opsx:archive` — after merge, archive the change (landed the same way as
+   step 7), then remove the worktree.
 
 ## Git rules (enforced by hooks — do not fight them)
 
 - Never commit, merge, or push on `main`. Branch protection, git hooks, and
   Claude hooks all block this; `--no-verify` is forbidden.
+- If the repo has no remote, never commit at all — the owner reviews and
+  commits (see step 7).
 - One change = one worktree = one `change/*` branch = one PR.
 - Quality gates: sessions cannot stop with failing rubocop; any
   `git merge`/`git pull` triggers a full rubocop+test gate.
@@ -61,7 +90,7 @@ Non-trivial work flows through OpenSpec. The cycle for every change:
 | frontend | Views, Hotwire, styling | UI implementation |
 | database-reviewer | Schema, migrations, query performance | Any schema/query work |
 | ui-designer | Layout, flows, visual consistency | Design before implementation |
-| qa | Tests and coverage | Writing/running tests |
+| qa | Tests, coverage, browser smoke tests | Writing/running tests; verifying UI in a real browser |
 | code-reviewer | Quality and maintainability | After any code is written |
 | security-reviewer | Vulnerability detection | Auth, input handling, sensitive data |
 | refactor-cleaner | Dead code cleanup | Maintenance between features |

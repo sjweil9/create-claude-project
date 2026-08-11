@@ -222,6 +222,12 @@ Done: scaffolding committed on branch change/claude-scaffolding
   local guards:      $GUARDS_MSG
   branch protection: $(if [ "$PROTECTED" = 1 ]; then echo "enabled (PRs required on main)"; elif [ "$USE_GITHUB" = 0 ]; then echo "skipped (--no-github)"; else echo "NOT enabled — see warnings above"; fi)
 
+Commit policy (detected at runtime from 'git remote'):
+  with a remote:    Claude commits on change/* branches and opens PRs; you merge.
+  local-only:       Claude NEVER commits (hook-enforced) — it leaves changes in
+                    the worktree for you to review, commit, and merge.
+                    Adding a remote later switches the project to the PR flow.
+
 Next steps:
   # review the scaffolding, then land it:
   git push -u origin change/claude-scaffolding && gh pr create   # PR flow
