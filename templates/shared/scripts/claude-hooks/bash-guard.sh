@@ -7,7 +7,15 @@ try: print(json.load(sys.stdin).get("tool_input",{}).get("command",""))
 except Exception: pass' 2>/dev/null)" || exit 0
 [ -n "$cmd" ] || exit 0
 
-branch="$(git -C "${CLAUDE_PROJECT_DIR:-.}" branch --show-current 2>/dev/null || echo "")"
+# Judge the branch from the session's working directory (hook input "cwd"),
+# not CLAUDE_PROJECT_DIR: a session working inside .worktrees/<change-id> is
+# on its change/* branch even while the main checkout sits on main.
+cwd="$(printf '%s' "$input" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("cwd",""))
+except Exception: pass' 2>/dev/null)"
+[ -n "$cwd" ] && [ -d "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-.}"
+
+branch="$(git -C "$cwd" branch --show-current 2>/dev/null || echo "")"
 block() { echo "BLOCKED by bash-guard: $1" >&2; exit 2; }
 
 # Force pushes: never.
@@ -25,7 +33,7 @@ fi
 # Local-only mode (no git remote): the owner reviews, commits, and merges.
 # Agents never commit — leave changes in the worktree for the owner.
 if [[ "$cmd" =~ git[[:space:]].*(commit|merge|cherry-pick|rebase)([[:space:]]|$) ]]; then
-  if ! git -C "${CLAUDE_PROJECT_DIR:-.}" remote 2>/dev/null | grep -q .; then
+  if ! git -C "$cwd" remote 2>/dev/null | grep -q .; then
     block "no git remote configured (local-only mode): agents never commit. Leave the changes uncommitted in the worktree and present them; the owner reviews, commits, and merges."
   fi
 fi
