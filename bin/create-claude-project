@@ -543,7 +543,9 @@ generate_react_app() {
   fi
   APP_STATE="Vite react-ts (npm) + $router_label/Query/Zustand/RHF+Zod/Axios/Tailwind/Vitest"
   echo "Generating React app with Vite (react-ts template, npm) ..."
-  npm create -y vite@latest "$NAME" -- --template react-ts >/dev/null \
+  # create-vite >= 9 opens an interactive prompt whenever stdin is a TTY,
+  # even with --template; with stdout silenced that reads as a silent hang.
+  npm create -y vite@latest "$NAME" -- --template react-ts --no-interactive --eslint >/dev/null \
     || die "Vite scaffold failed. Remove $TARGET before retrying."
   cd "$TARGET"
   ensure_main_branch
