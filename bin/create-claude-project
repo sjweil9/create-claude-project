@@ -355,6 +355,28 @@ wrap_layout_main() {
     app/views/layouts/application.html.erb
 }
 
+# rails new pins dependencies dependabot wants bumped the moment a fresh
+# repo is pushed (actions/checkout, actions/cache, image_processing). Bump
+# them at generation time so new projects start with no open dependabot PRs.
+# Version-compared, so a future Rails that generates newer pins is left alone.
+modernize_generated_pins() {
+  local f
+  for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+    [ -f "$f" ] || continue
+    perl -pi -e 's{(actions/checkout\@v)(\d+)}{ $2 < 7 ? $1 . "7" : $1 . $2 }ge;
+                 s{(actions/cache(?:/[a-z]+)?\@v)(\d+)}{ $2 < 6 ? $1 . "6" : $1 . $2 }ge' "$f"
+  done
+  if [ -f Gemfile ]; then
+    perl -pi -e 's{^((?:# )?gem "image_processing", )"~> 1\.\d+"}{$1"~> 2.0"}' Gemfile
+    if grep -q '^gem "image_processing", "~> 2.0"' Gemfile && [ -f Gemfile.lock ] \
+      && ! grep -q '^    image_processing (2\.' Gemfile.lock; then
+      bundle install >/dev/null 2>&1 \
+        || warn "Gemfile changed (image_processing ~> 2.0) — run bundle install in $TARGET"
+    fi
+  fi
+  return 0
+}
+
 ensure_main_branch() {
   if [ ! -d "$TARGET/.git" ]; then
     git init -q -b main 2>/dev/null || { git init -q && git symbolic-ref HEAD refs/heads/main; }
@@ -452,6 +474,7 @@ generate_rails_app() {
       || die "rails new failed (see output above). Remove $TARGET before retrying."
     cd "$TARGET"
     ensure_main_branch
+    modernize_generated_pins
 
     # Point Active Record at the compose network when the env vars are set;
     # with them unset the file behaves exactly as generated.
@@ -482,6 +505,7 @@ generate_rails_app() {
     || die "rails new failed (see output above). Remove $TARGET before retrying."
   cd "$TARGET"
   ensure_main_branch
+  modernize_generated_pins
   wrap_layout_main
   configure_api_auth
   if [ "$ROLE" = api ]; then
