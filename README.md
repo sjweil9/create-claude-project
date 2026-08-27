@@ -49,7 +49,13 @@ What gets generated per type:
   `rails new` — your own `--database`/`--css`/`--api` flags replace the
   defaults. `--skip-devise` skips Devise (model generation is left for the
   project interview); `--skip-docker` reverts to the host-toolchain flow
-  (needs bundler + reachable PostgreSQL).
+  (needs bundler + reachable PostgreSQL). `--api-session` generates an
+  **API-only backend** instead (`rails new --api`, no Tailwind/Devise) with
+  the same hand-rolled session-cookie login the react-rails API gets:
+  `has_secure_password` + bcrypt, httpOnly session cookie + CSRF-token flow,
+  signup/login/logout/me/csrf endpoints under `/api`, users migration, CORS
+  config, and (Dockerized) a sidekiq worker compose service; the generated
+  `docs/auth.md` includes a step-by-step Postman login walkthrough.
 - **react** — Vite (`react-ts` template), managed with **npm** on the
   regular node runtime, with the
   baseline stack installed and wired: **React Router v7** (`src/router.tsx`;
@@ -204,6 +210,9 @@ Templates live in `templates/`:
   scripts/docker-setup, dev-environment doc)
 - `templates/react-app-tanstack/` — the `--tanstack` variant of the react
   scaffold's router/entry/layout (TanStack Router, code-based routes)
+- `templates/rails-api-session/` — the `--api-session` standalone docs
+  overlay (`docs/auth.md` with the Postman walkthrough); the code wiring
+  reuses `templates/react-rails/api-common` + `api-session` + `api-docker`
 - `templates/react-rails/` — the react-rails auth wiring, overlaid on top of
   the per-app scaffolds: `api-common/` + `api-session/`/`api-jwt/`
   (controllers, models, migrations, routes, CORS) and `client-common/` +

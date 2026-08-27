@@ -12,7 +12,11 @@
 #          Development is Dockerized: docker-compose runs the app with
 #          postgres and redis on a named network, and every toolchain step
 #          (bundle, tailwind, devise, db:prepare) happens in containers —
-#          nothing depends on a host-installed database.
+#          nothing depends on a host-installed database. --api-session
+#          switches to `rails new --api` with the same hand-rolled
+#          session-cookie auth the react-rails API gets (has_secure_password
+#          + CSRF token flow, no Devise/Tailwind), documented for API
+#          clients like Postman in docs/auth.md.
 #   react: Vite (react-ts) + React Router, TanStack Query, Zustand,
 #          React Hook Form + Zod, Axios client with interceptors, Tailwind,
 #          Vitest + React Testing Library (+ MSW), Prettier — all managed
@@ -51,6 +55,12 @@ Options:
                   hand-rolled has_secure_password (not combinable with --jwt)
   --tanstack      react / react-rails: use TanStack Router (code-based
                   routes) instead of the default React Router v7
+  --api-session   rails: generate an API-only app (rails new --api) with
+                  session-cookie login wired in — the same hand-rolled
+                  has_secure_password + httpOnly-session-cookie + CSRF-token
+                  auth the react-rails API gets (signup/login/logout/me/csrf
+                  endpoints, users migration, CORS). Implies --skip-devise;
+                  docs/auth.md walks through using it from Postman
   --skip-devise   rails: do not add/configure Devise
   --skip-docker   Do not Dockerize: rails runs bundle/devise/db on the host
                   toolchain (needs bundler + a reachable PostgreSQL); react
@@ -68,7 +78,11 @@ What gets generated (in addition to the Claude baseline):
           config) with Tailwind-styled views. Dockerized dev: Dockerfile.dev
           + docker-compose.yml (app/db/redis on the <name>_dev network) +
           scripts/docker-setup, which builds the image and installs
-          gems/tailwind/devise/database entirely in containers.
+          gems/tailwind/devise/database entirely in containers. With
+          --api-session: rails --api instead, session middleware re-added,
+          bcrypt/rack-cors/sidekiq gems, auth controllers + users migration
+          + /api routes, a compose worker service, and a docs/auth.md with
+          a Postman login walkthrough.
   react   Vite react-ts app (managed with npm) with React Router, TanStack
           Query, Zustand, React Hook Form + Zod, Axios (request/response
           interceptors), Tailwind v4, Vitest + React Testing Library + MSW,
@@ -95,7 +109,7 @@ EOF
 die() { echo "error: $*" >&2; exit 1; }
 warn() { echo "warning: $*" >&2; }
 
-TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=0 SKIP_DEVISE=0 SKIP_APP=0 SKIP_DOCKER=0 JWT=0 DEVISE=0 TANSTACK=0
+TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=0 SKIP_DEVISE=0 SKIP_APP=0 SKIP_DOCKER=0 JWT=0 DEVISE=0 TANSTACK=0 API_SESSION=0
 # react-rails internals: the orchestrating run re-invokes this script per app
 # with --internal-* flags carrying the auth wiring context.
 ROLE="" AUTH_MODE="" PEER=""
@@ -108,6 +122,7 @@ while [ $# -gt 0 ]; do
     --jwt) JWT=1 ;;
     --devise) DEVISE=1 ;;
     --tanstack) TANSTACK=1 ;;
+    --api-session) API_SESSION=1 ;;
     --skip-devise) SKIP_DEVISE=1 ;;
     --skip-docker) SKIP_DOCKER=1 ;;
     --skip-app) SKIP_APP=1 ;;
@@ -135,6 +150,14 @@ fi
 [ "$DEVISE" = 1 ] && [ "$JWT" = 1 ] && die "--devise and --jwt are mutually exclusive"
 [ "$TANSTACK" = 1 ] && [ "$TYPE" = rails ] && [ -z "$ROLE" ] && die "--tanstack is only supported for react/react-rails"
 [ "$TYPE" = react-rails ] && [ "$SKIP_APP" = 1 ] && die "--skip-app is not supported for react-rails"
+[ "$API_SESSION" = 1 ] && [ "$TYPE" != rails ] && die "--api-session is only supported for rails (react-rails wires session auth by default)"
+[ "$API_SESSION" = 1 ] && [ "$SKIP_APP" = 1 ] && die "--api-session and --skip-app are mutually exclusive"
+if [ "$API_SESSION" = 1 ]; then
+  # Same hand-rolled session auth as the react-rails API — no Devise, and
+  # configure_api_auth's session branch does the wiring.
+  SKIP_DEVISE=1
+  AUTH_MODE=session
+fi
 if [ -n "$ROLE" ]; then
   case "$ROLE" in api|client) ;; *) die "internal error: bad --internal-role '$ROLE'" ;; esac
   case "$AUTH_MODE" in session|jwt|devise) ;; *) die "internal error: bad --internal-mode '$AUTH_MODE'" ;; esac
@@ -163,6 +186,11 @@ elif [ "$SKIP_APP" = 0 ]; then
 fi
 if [ "$SKIP_APP" = 0 ] && [ "$TYPE" = rails ] && [ "$SKIP_DEVISE" = 0 ]; then
   [ -d "$TEMPLATES/rails-devise" ] || die "templates not found under $TEMPLATES/rails-devise"
+fi
+if [ "$API_SESSION" = 1 ]; then
+  for d in react-rails/api-common react-rails/api-session rails-api-session; do
+    [ -d "$TEMPLATES/$d" ] || die "templates not found under $TEMPLATES/$d"
+  done
 fi
 if [ "$TANSTACK" = 1 ] && [ "$SKIP_APP" = 0 ]; then
   [ -d "$TEMPLATES/react-app-tanstack" ] || die "templates not found under $TEMPLATES/react-app-tanstack"
@@ -368,10 +396,19 @@ modernize_generated_pins() {
   done
   if [ -f Gemfile ]; then
     perl -pi -e 's{^((?:# )?gem "image_processing", )"~> 1\.\d+"}{$1"~> 2.0"}' Gemfile
-    if grep -q '^gem "image_processing", "~> 2.0"' Gemfile && [ -f Gemfile.lock ] \
-      && ! grep -q '^    image_processing (2\.' Gemfile.lock; then
-      bundle install >/dev/null 2>&1 \
-        || warn "Gemfile changed (image_processing ~> 2.0) — run bundle install in $TARGET"
+    # `rails new --api` UNCOMMENTS image_processing, and at ~> 2.0 the app
+    # then refuses to boot without the ruby-vips gem + system libvips —
+    # which neither Dockerfile.dev nor a bare host ships. Comment it back
+    # out (dependabot ignores commented pins; variants wouldn't work without
+    # libvips anyway). Re-enabling later means uncommenting + adding
+    # `gem "ruby-vips"`; the generated production Dockerfile already
+    # installs libvips.
+    if grep -q '^gem "image_processing", "~> 2.0"' Gemfile; then
+      perl -pi -e 's{^(gem "image_processing", "~> 2\.0")$}{# $1}' Gemfile
+      if [ -f Gemfile.lock ] && grep -q '^    image_processing (' Gemfile.lock; then
+        bundle install >/dev/null 2>&1 \
+          || warn "Gemfile changed (image_processing commented out) — run bundle install in $TARGET"
+      fi
     fi
   fi
   return 0
@@ -389,12 +426,13 @@ ensure_main_branch() {
 DB_STATE="n/a" DEVISE_STATE="n/a" DOCKER_STATE="n/a" APP_STATE="none (--skip-app)" AUTH_STATE="n/a"
 RAILS_MM=""
 
-# react-rails API role: wire the hand-rolled auth around the generated app —
-# gems and middleware here; controllers/models/routes/migrations arrive via
-# the templates/react-rails overlays in the main flow. Runs from inside the
-# generated app directory, before its initial commit.
+# react-rails API role (and standalone rails --api-session): wire the
+# hand-rolled auth around the generated app — gems and middleware here;
+# controllers/models/routes/migrations arrive via the templates/react-rails
+# overlays in the main flow. Runs from inside the generated app directory,
+# before its initial commit.
 configure_api_auth() {
-  [ "$ROLE" = api ] || return 0
+  { [ "$ROLE" = api ] || [ "$API_SESSION" = 1 ]; } || return 0
 
   if [ "$AUTH_MODE" = devise ]; then
     # Devise brings bcrypt itself; auth runs through warden behind custom
@@ -440,6 +478,8 @@ configure_api_auth() {
   fi
   if [ "$AUTH_MODE" = devise ]; then
     DEVISE_STATE="installed — warden-backed session auth via custom JSON controllers (docs/auth.md)"
+  elif [ "$API_SESSION" = 1 ]; then
+    DEVISE_STATE="n/a (--api-session uses hand-rolled auth)"
   else
     DEVISE_STATE="n/a (react-rails uses hand-rolled auth)"
   fi
@@ -447,7 +487,7 @@ configure_api_auth() {
 
 generate_rails_app() {
   local defaults=() a has_db=0 has_css=0 api_mode=0 has_api_flag=0
-  [ "$ROLE" = api ] && api_mode=1
+  { [ "$ROLE" = api ] || [ "$API_SESSION" = 1 ]; } && api_mode=1
   if [ "${#PASSTHRU[@]}" -gt 0 ]; then
     for a in "${PASSTHRU[@]}"; do
       case "$a" in
@@ -459,7 +499,7 @@ generate_rails_app() {
   fi
   [ "$has_db" = 0 ] && defaults+=(--database=postgresql)
   [ "$has_css" = 0 ] && [ "$api_mode" = 0 ] && defaults+=(--css=tailwind)
-  [ "$ROLE" = api ] && [ "$has_api_flag" = 0 ] && defaults+=(--api)
+  [ "$api_mode" = 1 ] && [ "$has_api_flag" = 0 ] && defaults+=(--api)
 
   RUBY_V="$(ruby -e 'print RUBY_VERSION')"
   RAILS_MM="$(rails --version 2>/dev/null | perl -ne 'print $1 if /(\d+\.\d+)/')"
@@ -508,7 +548,7 @@ generate_rails_app() {
   modernize_generated_pins
   wrap_layout_main
   configure_api_auth
-  if [ "$ROLE" = api ]; then
+  if [ "$ROLE" = api ] || [ "$API_SESSION" = 1 ]; then
     # rails new bundled before the auth gems were added; catch up.
     echo "Installing auth gems ..."
     bundle install >/dev/null || warn "bundle install failed — run it manually in $TARGET"
@@ -541,11 +581,11 @@ generate_rails_app() {
     # Tailwind-styled devise views: rendered over devise's unstyled gem
     # defaults; no `rails g devise:views` needed.
     overlay_tree "$TEMPLATES/rails-devise"
-  elif [ "$ROLE" != api ]; then
+  elif [ "$ROLE" != api ] && [ "$API_SESSION" = 0 ]; then
     DEVISE_STATE="skipped (--skip-devise)"
   fi
 
-  if [ "$ROLE" = api ]; then
+  if [ "$ROLE" = api ] || [ "$API_SESSION" = 1 ]; then
     # The auth migrations arrive via the react-rails overlays later in the
     # main flow (after {{...}} substitution); db:prepare runs there.
     DB_STATE="pending auth overlays"
@@ -663,6 +703,25 @@ if [ -n "$ROLE" ]; then
   fi
 fi
 
+# Standalone rails --api-session: reuse the react-rails API session-auth
+# overlays verbatim (controllers/model/migration/routes/CORS, worker compose
+# service), then swap docs/auth.md for the standalone version, which documents
+# the flow for direct API clients (Postman walkthrough) instead of the React
+# client.
+if [ "$API_SESSION" = 1 ]; then
+  AUTH_STATE="session — httpOnly cookie + CSRF token, Postman walkthrough in docs/auth.md"
+  overlay_tree "$TEMPLATES/react-rails/api-common"
+  overlay_tree "$TEMPLATES/react-rails/api-session"
+  overlay_tree "$TEMPLATES/rails-api-session"
+  if [ "$SKIP_DOCKER" = 0 ] && [ -d "$TEMPLATES/react-rails/api-docker" ]; then
+    overlay_tree "$TEMPLATES/react-rails/api-docker"
+    # The compose header describes the react-rails client; this app stands
+    # alone, so describe the network hook-up generically.
+    perl -0pi -e 's{\Q# The React client scaffolded alongside this app joins \E(\S+)\n\Q# as an external network and reaches the API at http://app:3000 through its\E\n\Q# dev-server /api proxy.\E}{# Other compose projects can join $1 as an external network\n# to reach this API at http://app:3000.}' \
+      "$TARGET/docker-compose.yml"
+  fi
+fi
+
 # Template substitution — only in files the overlays wrote (and that still
 # exist; --skip-docker removes some after they are copied).
 SUBST=()
@@ -676,10 +735,10 @@ chmod +x "$TARGET"/scripts/setup "$TARGET"/scripts/protect-main \
   "$TARGET"/scripts/git-hooks/* "$TARGET"/scripts/claude-hooks/*.sh
 [ -f "$TARGET/scripts/docker-setup" ] && chmod +x "$TARGET/scripts/docker-setup"
 
-# react-rails API without docker: the auth migrations landed with the
-# overlays above (post-substitution), so the database is prepared here rather
-# than inside generate_rails_app.
-if [ "$TYPE" = rails ] && [ "$ROLE" = api ] && [ "$SKIP_APP" = 0 ] && [ "$SKIP_DOCKER" = 1 ]; then
+# react-rails API (or --api-session) without docker: the auth migrations
+# landed with the overlays above (post-substitution), so the database is
+# prepared here rather than inside generate_rails_app.
+if [ "$TYPE" = rails ] && { [ "$ROLE" = api ] || [ "$API_SESSION" = 1 ]; } && [ "$SKIP_APP" = 0 ] && [ "$SKIP_DOCKER" = 1 ]; then
   echo "Preparing the database ..."
   if bin/rails db:prepare >/dev/null 2>&1; then
     DB_STATE="created (bin/rails db:prepare)"
@@ -760,7 +819,7 @@ cat <<EOF
 
 Done: $TARGET
   type:              $TYPE
-  app:               $APP_STATE$(if [ "$SKIP_APP" = 0 ]; then printf '\n  docker:            %s' "$DOCKER_STATE"; fi)$(if [ "$TYPE" = rails ] && [ "$SKIP_APP" = 0 ]; then printf '\n  database:          %s\n  devise:            %s' "$DB_STATE" "$DEVISE_STATE"; fi)$(if [ -n "$ROLE" ]; then printf '\n  auth:              %s' "$AUTH_STATE"; fi)
+  app:               $APP_STATE$(if [ "$SKIP_APP" = 0 ]; then printf '\n  docker:            %s' "$DOCKER_STATE"; fi)$(if [ "$TYPE" = rails ] && [ "$SKIP_APP" = 0 ]; then printf '\n  database:          %s\n  devise:            %s' "$DB_STATE" "$DEVISE_STATE"; fi)$(if [ -n "$ROLE" ] || [ "$API_SESSION" = 1 ]; then printf '\n  auth:              %s' "$AUTH_STATE"; fi)
   openspec:          initialized (/opsx:explore, propose, apply, archive, sync, update)
   local guards:      git hooks + Claude hooks installed (no commits/merges/pushes on main; worktree per change)
   branch protection: $(if [ "$PROTECTED" = 1 ]; then echo "enabled (PRs required on main)"; elif [ "$USE_GITHUB" = 0 ]; then echo "n/a (local-only — re-run with --github, or add a remote later and run scripts/protect-main)"; else echo "NOT enabled — see warnings above"; fi)
