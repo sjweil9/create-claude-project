@@ -50,7 +50,8 @@ What gets generated per type:
   defaults. `--skip-devise` skips Devise (model generation is left for the
   project interview); `--skip-docker` reverts to the host-toolchain flow
   (needs bundler + reachable PostgreSQL).
-- **react** — Vite (`react-ts` template), managed with **bun**, with the
+- **react** — Vite (`react-ts` template), managed with **npm** on the
+  regular node runtime, with the
   baseline stack installed and wired: **React Router v7** (`src/router.tsx`;
   pass `--tanstack` to use **TanStack Router** with typed, code-based routes
   instead), **TanStack Query** (`src/lib/queryClient.ts`), **Zustand**
@@ -61,9 +62,9 @@ What gets generated per type:
   environment, `src/test/` setup, sample component test) plus **type-aware
   ESLint** (flat config, typescript-eslint `strictTypeChecked`,
   react-hooks/react-refresh plugins, `eslint-config-prettier`) and Prettier;
-  tsconfig gets `noUncheckedIndexedAccess` on top of `strict`. `bun run
-  lint`, `bun run typecheck` (`tsc -b`, with a `typecheck:watch` variant),
-  `bun run test`, and `bun run build` are all green out of the box, and the
+  tsconfig gets `noUncheckedIndexedAccess` on top of `strict`. `npm run
+  lint`, `npm run typecheck` (`tsc -b`, with a `typecheck:watch` variant),
+  `npm run test`, and `npm run build` are all green out of the box, and the
   stop/merge quality-gate hooks run the same lint + typecheck. Also **Dockerized**: a dev container
   (`docker compose up`, node_modules in a named volume) with a commented-in
   switch to join another compose project's network — point
@@ -75,7 +76,11 @@ What gets generated per type:
   compose service) and `<name>-client` (react, as above). Sign-up/login is
   **wired end to end and hand-rolled** (`has_secure_password` + bcrypt, no
   auth gem): by default an **httpOnly session cookie** with a CSRF-token
-  flow (`GET /api/csrf` → `X-CSRF-Token` header); with `--jwt`, a 15-minute
+  flow (`GET /api/csrf` → `X-CSRF-Token` header); with `--devise`, the same
+  cookie flow and endpoints backed by **Devise** (warden +
+  `database_authenticatable` behind custom JSON controllers — Devise's own
+  routes/views are skipped, and password reset/confirmation/lockout are a
+  module away) instead of the hand-rolled model; with `--jwt`, a 15-minute
   **JWT access token kept in memory** plus a 30-day **rotating single-use
   refresh token** in an httpOnly cookie (reuse detection revokes the family;
   only SHA-256 digests are stored). Dockerized by default: the client's
@@ -169,9 +174,9 @@ How a change lands is detected at runtime from `git remote`:
 - node >= 22 on PATH or via nvm (found automatically) — used for the openspec
   CLI and the react test toolchain (vitest's jsdom/undici need >= 22.11)
 - `@fission-ai/openspec` (auto-installed globally if missing)
-- for `react` (and `react-rails`) projects: `bun` on PATH
-  (`curl -fsSL https://bun.sh/install | bash`) — the scaffold, dependency
-  installs, and package scripts all run through bun
+- for `react` (and `react-rails`) projects: nothing beyond node >= 22 + npm
+  (above) — the scaffold, dependency installs, and package scripts all run
+  through npm
 - for `rails` (and `react-rails`) projects: `rails` installed for the active
   ruby (`gem install rails`) and Docker with the compose plugin — postgres,
   redis, and all gem builds live in containers, so no host database or

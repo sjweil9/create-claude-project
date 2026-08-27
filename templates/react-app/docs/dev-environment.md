@@ -3,16 +3,16 @@
 The app runs either directly on the host or in Docker — both are first-class:
 
 ```sh
-bun run dev          # host: http://localhost:5173
+npm run dev          # host: http://localhost:5173
 docker compose up    # container: http://localhost:5173 (builds on first run)
                      # WEB_PORT=5273 docker compose up — another host port
 ```
 
-Dependencies are managed with **bun** (`bun install`, `bun add <pkg>`,
-`bun add -d <pkg>`). The container keeps its own `node_modules` in a named
-volume (linux binaries), so it never conflicts with a host `bun install`.
-Lint, typecheck, and tests run on the host as usual (`bun run lint`,
-`bun x tsc -b`, `bun run test`).
+Dependencies are managed with **npm** (`npm install`, `npm install <pkg>`,
+`npm install --save-dev <pkg>`). The container keeps its own `node_modules`
+in a named volume (linux binaries), so it never conflicts with a host
+`npm install`. Lint, typecheck, and tests run on the host as usual
+(`npm run lint`, `npm run typecheck`, `npm run test`).
 
 ## Talking to a backend
 

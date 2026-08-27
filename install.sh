@@ -64,11 +64,8 @@ else
   echo "  [warn]    rails not found for the active ruby — needed only for 'create-claude-project rails'/'react-rails' ('gem install rails')"
 fi
 
-if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
-  ok "bun (react apps are scaffolded and managed with bun)"
-else
-  echo "  [warn]    bun not found — needed for 'create-claude-project react'/'react-rails' (curl -fsSL https://bun.sh/install | bash)"
-fi
+# (react apps are scaffolded and managed with npm — covered by the node/npm
+# check above.)
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   ok "docker + compose (Dockerized dev environments for generated apps)"

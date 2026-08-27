@@ -16,24 +16,13 @@ if [ -f Gemfile ]; then
   fi
 elif [ -f package.json ]; then
   git status --porcelain 2>/dev/null | grep -qE '\.(ts|tsx|js|jsx|css)$' || exit 0
-  if bun_project; then
-    ensure_bun
-    ensure_node   # package bins (vitest, tsc) carry node shebangs
-    if has_pkg_script lint && ! bun run lint >"$log" 2>&1; then
-      fail_gate "lint" "$log"
-    fi
-    if [ -f tsconfig.json ] && ! bun x tsc -b >"$log" 2>&1; then
+  ensure_node
+  if ! npm run lint --if-present >"$log" 2>&1; then
+    fail_gate "lint" "$log"
+  fi
+  if [ -f tsconfig.json ]; then
+    if ! npx tsc -b >"$log" 2>&1; then
       fail_gate "tsc typecheck" "$log"
-    fi
-  else
-    ensure_node
-    if ! npm run lint --if-present >"$log" 2>&1; then
-      fail_gate "lint" "$log"
-    fi
-    if [ -f tsconfig.json ]; then
-      if ! npx tsc -b >"$log" 2>&1; then
-        fail_gate "tsc typecheck" "$log"
-      fi
     fi
   fi
 fi

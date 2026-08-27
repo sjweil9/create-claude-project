@@ -4,7 +4,7 @@ Full-stack pair scaffolded by `create-claude-project react-rails --jwt`:
 
 - **`{{API_NAME}}/`** — Rails API (API-only, PostgreSQL, Redis, sidekiq
   worker; Dockerized dev)
-- **`{{CLIENT_NAME}}/`** — React client (Vite + TypeScript, bun, Tailwind;
+- **`{{CLIENT_NAME}}/`** — React client (Vite + TypeScript, npm, Tailwind;
   Dockerized dev)
 
 Each app is its **own git repository** with the full Claude engineering
@@ -31,7 +31,7 @@ over the shared `{{API_NAME}}_dev` compose network, so the browser sees a
 single origin.
 
 Without Docker (`--skip-docker` at create time): run the API with
-`bin/rails server` and the client with `bun run dev`; the proxy targets
+`bin/rails server` and the client with `npm run dev`; the proxy targets
 `http://localhost:3000`.
 
 ## Auth: JWT + rotating refresh token

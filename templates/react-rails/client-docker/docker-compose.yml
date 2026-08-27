@@ -8,7 +8,7 @@
 # creates the network this file joins:
 #   cd ../{{PEER_NAME}} && docker compose up
 #
-# Running on the host with `bun run dev` works too (the proxy then targets
+# Running on the host with `npm run dev` works too (the proxy then targets
 # http://localhost:3000); the container keeps its own node_modules in a
 # named volume, so the two never conflict.
 services:

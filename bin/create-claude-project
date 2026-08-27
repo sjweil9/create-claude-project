@@ -16,13 +16,15 @@
 #   react: Vite (react-ts) + React Router, TanStack Query, Zustand,
 #          React Hook Form + Zod, Axios client with interceptors, Tailwind,
 #          Vitest + React Testing Library (+ MSW), Prettier — all managed
-#          with bun. Ships a dev container that can join another compose
-#          project's network (e.g. a Rails backend) via the dev-server /api
-#          proxy.
+#          with npm on the regular node runtime. Ships a dev container that
+#          can join another compose project's network (e.g. a Rails backend)
+#          via the dev-server /api proxy.
 #   react-rails: a <name>/ folder holding both — <name>-api (Rails API-only
 #          + postgres/redis/sidekiq worker) and <name>-client (React), each
 #          its own repo with the full baseline, wired together with working
-#          sign-up/login (httpOnly session cookie by default; --jwt switches
+#          sign-up/login (httpOnly session cookie by default; --devise backs
+#          that cookie flow with Devise instead of hand-rolled
+#          has_secure_password; --jwt switches
 #          to a 15-min JWT access token + rotating refresh token). In Docker
 #          the client joins the API's compose network and proxies /api/* to
 #          it, so the browser keeps a single origin.
@@ -44,6 +46,9 @@ Options:
   --jwt           react-rails: use JWT (15-min access token in memory) with
                   rotating refresh tokens instead of the default
                   session-cookie auth
+  --devise        react-rails: back the session-cookie auth with Devise
+                  (warden + custom JSON controllers) instead of the default
+                  hand-rolled has_secure_password (not combinable with --jwt)
   --tanstack      react / react-rails: use TanStack Router (code-based
                   routes) instead of the default React Router v7
   --skip-devise   rails: do not add/configure Devise
@@ -64,7 +69,7 @@ What gets generated (in addition to the Claude baseline):
           + docker-compose.yml (app/db/redis on the <name>_dev network) +
           scripts/docker-setup, which builds the image and installs
           gems/tailwind/devise/database entirely in containers.
-  react   Vite react-ts app (managed with bun) with React Router, TanStack
+  react   Vite react-ts app (managed with npm) with React Router, TanStack
           Query, Zustand, React Hook Form + Zod, Axios (request/response
           interceptors), Tailwind v4, Vitest + React Testing Library + MSW,
           Prettier. Dockerized dev: Dockerfile.dev + docker-compose.yml with
@@ -74,7 +79,9 @@ What gets generated (in addition to the Claude baseline):
           sidekiq worker) and <name>-client (react as above), each its own
           git repo with the full baseline, plus a parent README. Sign-up/
           login is wired end to end: session-cookie auth by default (CSRF
-          token flow included), or --jwt for access + rotating refresh
+          token flow included), hand-rolled with has_secure_password —
+          --devise keeps the same cookie flow and endpoints but backs them
+          with Devise — or --jwt for access + rotating refresh
           tokens. Dockerized by default; the client's compose file joins the
           API's <name>-api_dev network and the Vite dev server proxies
           /api/* to http://app:3000.
@@ -88,7 +95,7 @@ EOF
 die() { echo "error: $*" >&2; exit 1; }
 warn() { echo "warning: $*" >&2; }
 
-TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=0 SKIP_DEVISE=0 SKIP_APP=0 SKIP_DOCKER=0 JWT=0 TANSTACK=0
+TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=0 SKIP_DEVISE=0 SKIP_APP=0 SKIP_DOCKER=0 JWT=0 DEVISE=0 TANSTACK=0
 # react-rails internals: the orchestrating run re-invokes this script per app
 # with --internal-* flags carrying the auth wiring context.
 ROLE="" AUTH_MODE="" PEER=""
@@ -99,6 +106,7 @@ while [ $# -gt 0 ]; do
     --github) USE_GITHUB=1 ;;
     --public) VISIBILITY="--public" ;;
     --jwt) JWT=1 ;;
+    --devise) DEVISE=1 ;;
     --tanstack) TANSTACK=1 ;;
     --skip-devise) SKIP_DEVISE=1 ;;
     --skip-docker) SKIP_DOCKER=1 ;;
@@ -123,12 +131,16 @@ if [ "${#PASSTHRU[@]}" -gt 0 ]; then
 fi
 [ "$SKIP_DEVISE" = 1 ] && [ "$TYPE" != rails ] && warn "--skip-devise has no effect for $TYPE"
 [ "$JWT" = 1 ] && [ "$TYPE" != react-rails ] && die "--jwt is only supported for react-rails"
+[ "$DEVISE" = 1 ] && [ "$TYPE" != react-rails ] && die "--devise is only supported for react-rails (plain rails installs Devise by default; --skip-devise disables it)"
+[ "$DEVISE" = 1 ] && [ "$JWT" = 1 ] && die "--devise and --jwt are mutually exclusive"
 [ "$TANSTACK" = 1 ] && [ "$TYPE" = rails ] && [ -z "$ROLE" ] && die "--tanstack is only supported for react/react-rails"
 [ "$TYPE" = react-rails ] && [ "$SKIP_APP" = 1 ] && die "--skip-app is not supported for react-rails"
 if [ -n "$ROLE" ]; then
   case "$ROLE" in api|client) ;; *) die "internal error: bad --internal-role '$ROLE'" ;; esac
-  case "$AUTH_MODE" in session|jwt) ;; *) die "internal error: bad --internal-mode '$AUTH_MODE'" ;; esac
-  # react-rails auth is hand-rolled (has_secure_password), never Devise.
+  case "$AUTH_MODE" in session|jwt|devise) ;; *) die "internal error: bad --internal-mode '$AUTH_MODE'" ;; esac
+  # react-rails auth is wired by configure_api_auth + the react-rails
+  # overlays (devise mode ships its own initializer), never by the plain
+  # rails flow's Devise-with-views install.
   [ "$ROLE" = api ] && SKIP_DEVISE=1
 fi
 
@@ -225,10 +237,8 @@ if [ "$SKIP_APP" = 0 ] && { [ "$TYPE" = rails ] || [ "$TYPE" = react-rails ]; };
   # run, so the user is only prompted once.
   [ "$TYPE" = rails ] && check_ruby_freshness
 fi
-if [ "$SKIP_APP" = 0 ] && { [ "$TYPE" = react ] || [ "$TYPE" = react-rails ]; }; then
-  command -v bun >/dev/null 2>&1 \
-    || die "bun not found on PATH (react apps are managed with bun). Install it: curl -fsSL https://bun.sh/install | bash"
-fi
+# (react apps are managed with npm on the regular node runtime — the
+# node >= 22 / npm checks above cover them.)
 
 docker_ok() {
   command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
@@ -247,6 +257,7 @@ fi
 if [ "$TYPE" = react-rails ]; then
   AUTH_MODE=session
   [ "$JWT" = 1 ] && AUTH_MODE=jwt
+  [ "$DEVISE" = 1 ] && AUTH_MODE=devise
   API_NAME="$NAME-api" CLIENT_NAME="$NAME-client"
   SELF="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)/$(basename "$REAL_SCRIPT")"
 
@@ -276,14 +287,14 @@ if [ "$TYPE" = react-rails ]; then
   RUN_CLIENT="docker compose up   (start the API first — it creates the shared network)"
   if [ "$SKIP_DOCKER" = 1 ]; then
     RUN_API="bin/rails server"
-    RUN_CLIENT="bun run dev"
+    RUN_CLIENT="npm run dev"
   fi
   cat <<EOF
 
 Done: $TARGET (react-rails, two repos + parent README)
   api:     $API_NAME/     rails API-only + postgres/redis/sidekiq worker
-  client:  $CLIENT_NAME/  react (vite + bun); /api proxied to the API
-  auth:    $AUTH_MODE$(if [ "$AUTH_MODE" = jwt ]; then echo " (15-min access token + rotating refresh token)"; else echo " (httpOnly session cookie + CSRF token)"; fi) — sign-up/login wired end to end
+  client:  $CLIENT_NAME/  react (vite + npm); /api proxied to the API
+  auth:    $AUTH_MODE$(if [ "$AUTH_MODE" = jwt ]; then echo " (15-min access token + rotating refresh token)"; elif [ "$AUTH_MODE" = devise ]; then echo " (httpOnly session cookie + CSRF token, Devise-backed)"; else echo " (httpOnly session cookie + CSRF token)"; fi) — sign-up/login wired end to end
 
 Next steps:
   cd $NAME/$API_NAME    && $RUN_API
@@ -363,10 +374,18 @@ RAILS_MM=""
 configure_api_auth() {
   [ "$ROLE" = api ] || return 0
 
-  # bcrypt for has_secure_password, rack-cors for the client's direct-access
-  # mode; rails new ships both commented out.
-  perl -pi -e 's/^# (gem "bcrypt".*)$/$1/' Gemfile
-  grep -q '^gem "bcrypt"' Gemfile || printf '\n# has_secure_password\ngem "bcrypt", "~> 3.1.7"\n' >>Gemfile
+  if [ "$AUTH_MODE" = devise ]; then
+    # Devise brings bcrypt itself; auth runs through warden behind custom
+    # JSON controllers. The initializer ships in the api-devise overlay, so
+    # `devise:install` never needs to run.
+    printf '\n# Authentication (session cookie, Devise-backed)\ngem "devise"\n' >>Gemfile
+  else
+    # bcrypt for has_secure_password; rails new ships it commented out.
+    perl -pi -e 's/^# (gem "bcrypt".*)$/$1/' Gemfile
+    grep -q '^gem "bcrypt"' Gemfile || printf '\n# has_secure_password\ngem "bcrypt", "~> 3.1.7"\n' >>Gemfile
+  fi
+  # rack-cors for the client's direct-access mode; rails new ships it
+  # commented out.
   perl -pi -e 's/^# (gem "rack-cors".*)$/$1/' Gemfile
   grep -q '^gem "rack-cors"' Gemfile || printf '\ngem "rack-cors"\n' >>Gemfile
   if [ "$AUTH_MODE" = jwt ]; then
@@ -392,10 +411,16 @@ configure_api_auth() {
 
   if [ "$AUTH_MODE" = jwt ]; then
     AUTH_STATE="jwt — 15-min access token + rotating refresh token (docs/auth.md)"
+  elif [ "$AUTH_MODE" = devise ]; then
+    AUTH_STATE="session — httpOnly cookie + CSRF token, Devise-backed (docs/auth.md)"
   else
     AUTH_STATE="session — httpOnly cookie + CSRF token (docs/auth.md)"
   fi
-  DEVISE_STATE="n/a (react-rails uses hand-rolled auth)"
+  if [ "$AUTH_MODE" = devise ]; then
+    DEVISE_STATE="installed — warden-backed session auth via custom JSON controllers (docs/auth.md)"
+  else
+    DEVISE_STATE="n/a (react-rails uses hand-rolled auth)"
+  fi
 }
 
 generate_rails_app() {
@@ -516,23 +541,23 @@ generate_react_app() {
   if [ "$TANSTACK" = 1 ]; then
     router_pkg=@tanstack/react-router router_label="TanStack Router"
   fi
-  APP_STATE="Vite react-ts (bun) + $router_label/Query/Zustand/RHF+Zod/Axios/Tailwind/Vitest"
-  echo "Generating React app with Vite (react-ts template, bun) ..."
-  bun x create-vite@latest "$NAME" --template react-ts >/dev/null \
+  APP_STATE="Vite react-ts (npm) + $router_label/Query/Zustand/RHF+Zod/Axios/Tailwind/Vitest"
+  echo "Generating React app with Vite (react-ts template, npm) ..."
+  npm create -y vite@latest "$NAME" -- --template react-ts >/dev/null \
     || die "Vite scaffold failed. Remove $TARGET before retrying."
   cd "$TARGET"
   ensure_main_branch
 
-  echo "Installing dependencies with bun (router, query, zustand, forms, axios, tailwind, testing) ..."
-  bun install >/dev/null
-  bun add \
+  echo "Installing dependencies with npm (router, query, zustand, forms, axios, tailwind, testing) ..."
+  npm install >/dev/null
+  npm install \
     "$router_pkg" @tanstack/react-query zustand react-hook-form zod @hookform/resolvers axios >/dev/null
-  bun add --dev \
+  npm install --save-dev \
     tailwindcss @tailwindcss/vite vitest jsdom @testing-library/react @testing-library/jest-dom @testing-library/user-event msw prettier @types/node \
     eslint @eslint/js typescript-eslint eslint-plugin-react-hooks eslint-plugin-react-refresh eslint-config-prettier globals >/dev/null
   # The scaffold's lint gate is type-aware ESLint (see eslint.config.js in
   # the overlay); drop the Vite template's oxlint setup if it shipped one.
-  bun remove oxlint eslint-plugin-oxlint >/dev/null 2>&1 || true
+  npm uninstall oxlint eslint-plugin-oxlint >/dev/null 2>&1 || true
   rm -f .oxlintrc.json
 
   # Full strictness plus noUncheckedIndexedAccess (arr[i] is T | undefined);
@@ -594,9 +619,14 @@ overlay_tree "$TEMPLATES/create"   # create-mode extras (greenfield interview sk
 if [ -n "$ROLE" ]; then
   if [ "$ROLE" = client ]; then
     AUTH_STATE="$AUTH_MODE — store/pages/API client wired (docs/auth.md)"
+    [ "$AUTH_MODE" = devise ] && AUTH_STATE="session (devise-backed API) — store/pages/API client wired (docs/auth.md)"
   fi
+  # Devise mode keeps the session endpoint contract, so the client side is
+  # the session overlay verbatim; only the API overlay differs.
+  OVERLAY_MODE="$AUTH_MODE"
+  [ "$ROLE" = client ] && [ "$AUTH_MODE" = devise ] && OVERLAY_MODE=session
   overlay_tree "$TEMPLATES/react-rails/$ROLE-common"
-  overlay_tree "$TEMPLATES/react-rails/$ROLE-$AUTH_MODE"
+  overlay_tree "$TEMPLATES/react-rails/$ROLE-$OVERLAY_MODE"
   # TanStack Router variant of the client router/layout/auth pages (the
   # common overlay ships the React Router versions).
   if [ "$ROLE" = client ] && [ "$TANSTACK" = 1 ]; then
@@ -657,7 +687,7 @@ if [ "$TYPE" = rails ] && [ "$SKIP_APP" = 0 ] && [ "$SKIP_DOCKER" = 0 ]; then
 fi
 
 if [ "$TYPE" = react ] && [ "$SKIP_APP" = 0 ]; then
-  bun x prettier --write src --log-level warn >/dev/null 2>&1 || true
+  npx prettier --write src --log-level warn >/dev/null 2>&1 || true
 fi
 
 # --- OpenSpec init (generates /opsx:* commands + openspec-* skills) ----------
@@ -693,8 +723,8 @@ fi
 "$TARGET"/scripts/setup >/dev/null
 
 if [ "$TYPE" = react ]; then
-  RUN_CMD="bun run dev  (or in Docker: docker compose up)"
-  [ "$SKIP_DOCKER" = 1 ] && RUN_CMD="bun run dev"
+  RUN_CMD="npm run dev  (or in Docker: docker compose up)"
+  [ "$SKIP_DOCKER" = 1 ] && RUN_CMD="npm run dev"
 else
   RUN_CMD="docker compose up"
   [ "$SKIP_DOCKER" = 1 ] && RUN_CMD="bin/dev"

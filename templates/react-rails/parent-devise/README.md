@@ -1,6 +1,6 @@
 # {{PROJECT_NAME}}
 
-Full-stack pair scaffolded by `create-claude-project react-rails`:
+Full-stack pair scaffolded by `create-claude-project react-rails --devise`:
 
 - **`{{API_NAME}}/`** — Rails API (API-only, PostgreSQL, Redis, sidekiq
   worker; Dockerized dev)
@@ -34,16 +34,20 @@ Without Docker (`--skip-docker` at create time): run the API with
 `bin/rails server` and the client with `npm run dev`; the proxy targets
 `http://localhost:3000`.
 
-## Auth: session cookie (default)
+## Auth: session cookie via Devise
 
 Sign-up/login is wired end to end with Rails' **encrypted, httpOnly session
-cookie** — no auth gem, every moving part visible in the code:
+cookie**, backed by **Devise** (warden + `database_authenticatable`) behind
+custom JSON controllers — Devise's own routes/views are skipped, so the
+endpoint contract matches the hand-rolled variant exactly:
 
 - The cookie is httpOnly, so JavaScript can never read the credential.
 - State-changing requests carry a **CSRF token** the client reads from
   `GET /api/csrf` and echoes in the `X-CSRF-Token` header; it rotates with
   the session on login/logout.
 - `reset_session` on login prevents session fixation.
+- Password reset, confirmation, lockout, etc. are a Devise module away —
+  see `{{API_NAME}}/config/initializers/devise.rb`.
 
 Endpoints: `POST /api/signup`, `POST /api/login`, `DELETE /api/logout`,
 `GET /api/me`, `GET /api/csrf`.

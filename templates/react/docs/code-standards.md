@@ -17,7 +17,7 @@ this doc; project-specific decisions get recorded here with their why.
   errors: `no-floating-promises` (the single highest-value rule in async
   React code), `no-misused-promises`, unsafe `any` flow. It runs the TS
   program under the hood, so it's slower — editors may run only the fast
-  rules, but `bun run lint` in the quality gates and CI always runs the full
+  rules, but `npm run lint` in the quality gates and CI always runs the full
   config. Fix violations, don't disable rules; a disable comment needs an
   inline reason.
 - **Prettier** for formatting, with `eslint-config-prettier` silencing the
@@ -26,7 +26,7 @@ this doc; project-specific decisions get recorded here with their why.
   type-aware rules in CI — Biome's own type inference doesn't yet match
   typescript-eslint's depth.)
 - `tsc -b` green is a gate of its own — the bundler and test runner do not
-  typecheck. `bun run typecheck` in CI/gates; `bun run typecheck:watch`
+  typecheck. `npm run typecheck` in CI/gates; `npm run typecheck:watch`
   locally while developing.
 - **Dates**: format and localize with the built-in `Intl` APIs; reach for
   **date-fns** for the comparison/manipulation functions `Intl` can't
@@ -51,7 +51,7 @@ this doc; project-specific decisions get recorded here with their why.
 - **Presentational components stay dumb** — data fetching and business logic
   live in the data layer; components consume via hooks.
 - **Build on shadcn/ui as the component base** where possible — add
-  primitives with `bunx shadcn@latest add <component>` and restyle via
+  primitives with `npx shadcn@latest add <component>` and restyle via
   Tailwind/tokens rather than hand-rolling buttons, dialogs, dropdowns,
   forms, and tables from scratch. Hand-rolled primitives need a reason
   shadcn can't cover.

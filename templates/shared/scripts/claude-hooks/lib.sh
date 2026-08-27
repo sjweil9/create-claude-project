@@ -1,8 +1,7 @@
 # Shared helpers for Claude quality-gate hooks. Sourced, not executed.
 
-# Put a node >= 22 on PATH if the default one is too old (nvm layouts).
-# Needed even for bun projects: package bins (vitest, tsc) carry node
-# shebangs, and vitest's jsdom/undici need node >= 22.11.
+# Put a node >= 22 on PATH if the default one is too old (nvm layouts) —
+# vitest's jsdom/undici need node >= 22.11.
 ensure_node() {
   node -e 'process.exit(+process.versions.node.split(".")[0]>=22?0:1)' 2>/dev/null && return 0
   local best="" d
@@ -13,17 +12,6 @@ ensure_node() {
   [ -n "$best" ] && PATH="$best:$PATH"
   return 0
 }
-
-# Put bun on PATH (default install location) when not already there.
-ensure_bun() {
-  command -v bun >/dev/null 2>&1 && return 0
-  [ -x "$HOME/.bun/bin/bun" ] && PATH="$HOME/.bun/bin:$PATH"
-  return 0
-}
-
-# The react scaffold manages packages with bun; repos without a bun lockfile
-# fall back to npm.
-bun_project() { [ -f bun.lock ] || [ -f bun.lockb ]; }
 
 # has_pkg_script <name>: does package.json define this script?
 has_pkg_script() { grep -q "\"$1\"[[:space:]]*:" package.json 2>/dev/null; }

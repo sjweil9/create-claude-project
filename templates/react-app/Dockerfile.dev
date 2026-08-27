@@ -1,10 +1,10 @@
 # Development image. The source tree is bind-mounted and node_modules live
 # in a named volume (see docker-compose.yml), so container (linux) binaries
-# never mix with any host node_modules. bun install runs on start and is a
+# never mix with any host node_modules. npm install runs on start and is a
 # fast no-op once the volume is warm.
-FROM oven/bun:1
+FROM node:{{NODE_MAJOR}}
 
 WORKDIR /app
 
 EXPOSE 5173
-CMD ["sh", "-c", "bun install && bun run dev --host 0.0.0.0"]
+CMD ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
