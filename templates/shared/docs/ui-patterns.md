@@ -23,7 +23,9 @@ here as they are established.
 
 ## Styling
 
-- **Tailwind CSS** for all styling; custom CSS only when absolutely necessary
+- The scaffold's CSS framework for all styling — **Tailwind CSS** (v4 via
+  the Vite plugin for react, tailwindcss-rails for rails) — custom CSS only
+  when absolutely necessary
 - **Dark mode + light mode** supported by default in every component from day
   one — never bolted on later
 - Define theme decisions (palette, spacing, type scale) as design tokens and

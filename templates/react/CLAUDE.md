@@ -10,7 +10,11 @@ first session replaces this section with a real project description.)
 
 Read the relevant docs before starting any work. See `docs/README.md` for the
 full map: `overview.md`, `architecture.md`, `code-standards.md`, `testing.md`,
-`deployment.md`, `ui-patterns.md`, `features/`.
+`deployment.md`, `dev-environment.md`, `ui-patterns.md`, `features/`.
+
+`docs/dev-environment.md` (when present) covers how to run the app —
+including the Docker dev container and how it pairs with a backend's
+compose network via the dev-server `/api` proxy.
 
 ## Standing Instructions
 

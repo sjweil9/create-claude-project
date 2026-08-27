@@ -1,8 +1,9 @@
 # create-claude-project
 
 Scaffolds a minimal reproducible baseline of AI-assisted engineering
-standards — either as a brand-new project (`create-claude-project`) or added
-onto an existing codebase (`add-claude-scaffolding`).
+standards — either as a brand-new project (`create-claude-project`, which
+also generates a real Rails or React application) or added onto an existing
+codebase (`add-claude-scaffolding`).
 
 ## Install
 
@@ -14,7 +15,7 @@ git clone <this-repo> && cd create-claude-project
 `install.sh` symlinks both commands into `~/.local/bin` (or
 `/usr/local/bin`), tells you if that directory needs adding to your PATH, and
 reports on required dependencies. Everything else is resolved at runtime: the
-command finds a node >= 20 via nvm if your default node is older, and installs
+command finds a node >= 22 via nvm if your default node is older, and installs
 the `@fission-ai/openspec` CLI globally if missing.
 
 ## Usage
@@ -22,13 +23,71 @@ the `@fission-ai/openspec` CLI globally if missing.
 ### New project
 
 ```sh
-create-claude-project <react|rails> <project-name> [--github] [--public]
+create-claude-project <react|rails|react-rails> <project-name> [options] [-- <rails new args>]
 ```
 
-Creates `./<project-name>` in the current directory as a **local-only git
-repo by default** — no remote is created. Pass `--github` to also create a
-GitHub repo (private unless `--public`), push main, and enable branch
-protection. Then:
+Creates `./<project-name>` in the current directory: a real application plus
+the Claude baseline, as a **local-only git repo by default** — no remote is
+created. Pass `--github` to also create a GitHub repo (private unless
+`--public`), push main, and enable branch protection.
+
+What gets generated per type:
+
+- **rails** — `rails new` using whatever ruby/rails is active on your PATH
+  (rbenv/rvm/asdf respected), defaulting to `--database=postgresql
+  --css=tailwind` (tailwindcss-rails, standalone binary — no node), plus
+  **Devise** with Tailwind-styled views. Development is **Dockerized**:
+  `docker-compose.yml` runs the app with PostgreSQL 17 and Redis 7 on a
+  `<name>_dev` network, and the generated `scripts/docker-setup`
+  (idempotent) builds the dev image and runs bundle install, tailwind and
+  devise installers (mailer URL options + layout flash messages applied,
+  initializer rubocop-autocorrected), and `db:prepare` — **entirely in
+  containers**. Nothing depends on host-installed PostgreSQL, Redis, or gem
+  native builds; the host only needs ruby/rails (to generate) and Docker.
+  If Docker isn't running at create time, the files still land and you run
+  `scripts/docker-setup` later. Everything after `--` is passed straight to
+  `rails new` — your own `--database`/`--css`/`--api` flags replace the
+  defaults. `--skip-devise` skips Devise (model generation is left for the
+  project interview); `--skip-docker` reverts to the host-toolchain flow
+  (needs bundler + reachable PostgreSQL).
+- **react** — Vite (`react-ts` template), managed with **bun**, with the
+  baseline stack installed and wired: **React Router v7** (`src/router.tsx`;
+  pass `--tanstack` to use **TanStack Router** with typed, code-based routes
+  instead), **TanStack Query** (`src/lib/queryClient.ts`), **Zustand**
+  (`src/stores/`), **React Hook Form + Zod** (installed, with
+  `@hookform/resolvers`), **Axios** client with request/response
+  interceptors and a normalized error shape (`src/lib/api/client.ts`),
+  **Tailwind v4**, and **Vitest + React Testing Library + MSW** (jsdom
+  environment, `src/test/` setup, sample component test) plus **type-aware
+  ESLint** (flat config, typescript-eslint `strictTypeChecked`,
+  react-hooks/react-refresh plugins, `eslint-config-prettier`) and Prettier;
+  tsconfig gets `noUncheckedIndexedAccess` on top of `strict`. `bun run
+  lint`, `bun run typecheck` (`tsc -b`, with a `typecheck:watch` variant),
+  `bun run test`, and `bun run build` are all green out of the box, and the
+  stop/merge quality-gate hooks run the same lint + typecheck. Also **Dockerized**: a dev container
+  (`docker compose up`, node_modules in a named volume) with a commented-in
+  switch to join another compose project's network — point
+  `VITE_API_PROXY_TARGET` at a Rails backend's `app` service and the dev
+  server proxies `/api/*` there, no CORS setup needed.
+- **react-rails** — a `./<name>/` folder (plain folder, not a repo) holding
+  **two independent repos**, each with the full baseline:
+  `<name>-api` (rails `--api` + PostgreSQL + Redis + a **sidekiq worker**
+  compose service) and `<name>-client` (react, as above). Sign-up/login is
+  **wired end to end and hand-rolled** (`has_secure_password` + bcrypt, no
+  auth gem): by default an **httpOnly session cookie** with a CSRF-token
+  flow (`GET /api/csrf` → `X-CSRF-Token` header); with `--jwt`, a 15-minute
+  **JWT access token kept in memory** plus a 30-day **rotating single-use
+  refresh token** in an httpOnly cookie (reuse detection revokes the family;
+  only SHA-256 digests are stored). Dockerized by default: the client's
+  compose file joins the API's `<name>-api_dev` network and the Vite dev
+  server proxies `/api/*` to `http://app:3000`, so the browser keeps a
+  single origin and cookies flow without CORS. Anything after `--` still
+  goes to `rails new`; `--skip-docker` runs both apps on the host
+  toolchain; `--tanstack` applies to the client. Each app documents its
+  half of the flow in `docs/auth.md`.
+
+`--skip-app` skips application generation entirely and lays down only the
+Claude baseline in an empty repo. Then:
 
 ```sh
 cd <project-name>
@@ -90,6 +149,8 @@ How a change lands is detected at runtime from `git remote`:
 
 | Layer | Mechanism |
 |-------|-----------|
+| Application (create mode) | rails: `rails new` with the active ruby/rails — PostgreSQL + Tailwind + Devise by default, `rails new` flags passed through after `--`. react: Vite react-ts + React Router, TanStack Query, Zustand, React Hook Form + Zod, Axios (interceptors), Tailwind v4, Vitest + RTL + MSW, Prettier. |
+| Dockerized dev (create mode) | rails: `Dockerfile.dev` + compose (app/postgres/redis on a `<name>_dev` network) + idempotent `scripts/docker-setup`; all toolchain steps run in containers, and the quality-gate hooks route rubocop/tests through `docker compose run` automatically. react: dev container with node_modules volume, plus a documented switch to join a backend's compose network via the Vite `/api` proxy. `--skip-docker` opts out. |
 | Lean CLAUDE.md | Orchestrator role, agent routing table, workflow rules; detail lives in `docs/` and agent files. Standing guardrails: ask for clarification instead of assuming; never assume data shapes/APIs without samples or a real endpoint (stop and ask); escalate after 2 failed attempts (stop, analyze, change approach); no task is complete without an adversarial code review. |
 | Specialist agents | `.claude/agents/` — planner, architect, code-reviewer (adversarial: its job is to find reasons the change is NOT done), security-reviewer, qa, devops, ui-designer, refactor-cleaner + type-specific implementers (react: frontend, state; rails: backend, frontend, database-reviewer). Each has scope, guidelines, and explicit boundaries/handoffs. |
 | Vendored skills | `.claude/skills/` — Anthropic's `frontend-design` (loaded by frontend/ui-designer agents before significant UI work) and `webapp-testing` (loaded by qa to run headless-Playwright browser smoke tests, required for every UI-affecting change). |
@@ -105,8 +166,17 @@ How a change lands is detected at runtime from `git remote`:
 - git, python3 (for the generated Claude hooks)
 - `gh` authenticated (`gh auth login`) — only needed with `--github` (or for
   branch protection in add mode when a remote exists)
-- node >= 20 on PATH or via nvm (found automatically)
+- node >= 22 on PATH or via nvm (found automatically) — used for the openspec
+  CLI and the react test toolchain (vitest's jsdom/undici need >= 22.11)
 - `@fission-ai/openspec` (auto-installed globally if missing)
+- for `react` (and `react-rails`) projects: `bun` on PATH
+  (`curl -fsSL https://bun.sh/install | bash`) — the scaffold, dependency
+  installs, and package scripts all run through bun
+- for `rails` (and `react-rails`) projects: `rails` installed for the active
+  ruby (`gem install rails`) and Docker with the compose plugin — postgres,
+  redis, and all gem builds live in containers, so no host database or
+  bundler is needed. (With `--skip-docker`: bundler and a reachable
+  PostgreSQL server on the host instead.)
 
 Note: branch protection on **private** repos requires a paid GitHub plan. If
 protection fails, the local guards still block direct pushes; re-run
@@ -120,10 +190,27 @@ Templates live in `templates/`:
   `webapp-testing` from [anthropics/skills](https://github.com/anthropics/skills))
 - `templates/react/`, `templates/rails/` — CLAUDE.md, gitignore, type-specific
   agents, pre-populated code-standards/testing baselines
+- `templates/react-app/` — the React application scaffold overlaid onto the
+  fresh Vite app in create mode only (router, query client, axios
+  interceptors, zustand store, tailwind entry, vitest/MSW test setup, dev
+  container + compose file)
+- `templates/rails-app/` — the Rails Dockerized-dev scaffold overlaid in
+  create mode only (Dockerfile.dev, docker-compose.yml with postgres/redis,
+  scripts/docker-setup, dev-environment doc)
+- `templates/react-app-tanstack/` — the `--tanstack` variant of the react
+  scaffold's router/entry/layout (TanStack Router, code-based routes)
+- `templates/react-rails/` — the react-rails auth wiring, overlaid on top of
+  the per-app scaffolds: `api-common/` + `api-session/`/`api-jwt/`
+  (controllers, models, migrations, routes, CORS) and `client-common/` +
+  `client-session/`/`client-jwt/` (auth store, pages, API client;
+  `client-tanstack/` swaps the router/pages for `--tanstack`), plus
+  `api-docker/`/`client-docker/` compose overrides (worker service; shared
+  network) and `parent-session/`/`parent-jwt/` (the parent README)
 - `templates/create/` — greenfield-only extras (project-interview skill)
 - `templates/add/` — existing-codebase-only extras (project-onboarding skill)
 
-`{{PROJECT_NAME}}`, `{{PROJECT_TYPE}}`, and `{{BOOTSTRAP_SKILL}}` are
-substituted at generation time. In create mode, type-specific files override
+`{{PROJECT_NAME}}`, `{{PROJECT_TYPE}}`, `{{BOOTSTRAP_SKILL}}`,
+`{{RAILS_MIGRATION_VERSION}}`, and `{{PEER_NAME}}` are substituted at
+generation time. In create mode, type-specific files override
 shared ones at the same path; in add mode, files already present in the
 project always win and are reported as skipped.

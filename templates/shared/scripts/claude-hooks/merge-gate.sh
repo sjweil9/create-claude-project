@@ -14,17 +14,25 @@ trap 'rm -f "$log"' EXIT
 
 if [ -f Gemfile ]; then
   if grep -q rubocop Gemfile.lock 2>/dev/null; then
-    bundle exec rubocop --force-exclusion >"$log" 2>&1 || fail_gate "post-merge rubocop" "$log"
+    app_exec bundle exec rubocop --force-exclusion >"$log" 2>&1 || fail_gate "post-merge rubocop" "$log"
   fi
   if [ -d spec ] && grep -q rspec Gemfile.lock 2>/dev/null; then
-    bundle exec rspec >"$log" 2>&1 || fail_gate "post-merge rspec" "$log"
+    app_exec_deps bundle exec rspec >"$log" 2>&1 || fail_gate "post-merge rspec" "$log"
   elif [ -d test ]; then
-    bin/rails test >"$log" 2>&1 || fail_gate "post-merge rails test" "$log"
+    app_exec_deps bin/rails test >"$log" 2>&1 || fail_gate "post-merge rails test" "$log"
   fi
 elif [ -f package.json ]; then
-  ensure_node
-  npm run lint --if-present >"$log" 2>&1 || fail_gate "post-merge lint" "$log"
-  npm run build --if-present >"$log" 2>&1 || fail_gate "post-merge build" "$log"
-  CI=1 npm test --if-present >"$log" 2>&1 || fail_gate "post-merge tests" "$log"
+  if bun_project; then
+    ensure_bun
+    ensure_node   # package bins (vitest, tsc) carry node shebangs
+    if has_pkg_script lint; then bun run lint >"$log" 2>&1 || fail_gate "post-merge lint" "$log"; fi
+    if has_pkg_script build; then bun run build >"$log" 2>&1 || fail_gate "post-merge build" "$log"; fi
+    if has_pkg_script test; then CI=1 bun run test >"$log" 2>&1 || fail_gate "post-merge tests" "$log"; fi
+  else
+    ensure_node
+    npm run lint --if-present >"$log" 2>&1 || fail_gate "post-merge lint" "$log"
+    npm run build --if-present >"$log" 2>&1 || fail_gate "post-merge build" "$log"
+    CI=1 npm test --if-present >"$log" 2>&1 || fail_gate "post-merge tests" "$log"
+  fi
 fi
 exit 0

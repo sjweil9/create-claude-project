@@ -10,19 +10,30 @@ trap 'rm -f "$log"' EXIT
 if [ -f Gemfile ]; then
   git status --porcelain 2>/dev/null | grep -qE '\.(rb|erb)$' || exit 0
   if grep -q rubocop Gemfile.lock 2>/dev/null; then
-    if ! bundle exec rubocop --force-exclusion --fail-level convention >"$log" 2>&1; then
+    if ! app_exec bundle exec rubocop --force-exclusion --fail-level convention >"$log" 2>&1; then
       fail_gate "rubocop" "$log"
     fi
   fi
 elif [ -f package.json ]; then
   git status --porcelain 2>/dev/null | grep -qE '\.(ts|tsx|js|jsx|css)$' || exit 0
-  ensure_node
-  if ! npm run lint --if-present >"$log" 2>&1; then
-    fail_gate "lint" "$log"
-  fi
-  if [ -f tsconfig.json ]; then
-    if ! npx tsc -b >"$log" 2>&1; then
+  if bun_project; then
+    ensure_bun
+    ensure_node   # package bins (vitest, tsc) carry node shebangs
+    if has_pkg_script lint && ! bun run lint >"$log" 2>&1; then
+      fail_gate "lint" "$log"
+    fi
+    if [ -f tsconfig.json ] && ! bun x tsc -b >"$log" 2>&1; then
       fail_gate "tsc typecheck" "$log"
+    fi
+  else
+    ensure_node
+    if ! npm run lint --if-present >"$log" 2>&1; then
+      fail_gate "lint" "$log"
+    fi
+    if [ -f tsconfig.json ]; then
+      if ! npx tsc -b >"$log" 2>&1; then
+        fail_gate "tsc typecheck" "$log"
+      fi
     fi
   fi
 fi

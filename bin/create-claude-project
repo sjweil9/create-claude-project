@@ -1,27 +1,83 @@
 #!/usr/bin/env bash
 #
-# create-claude-project <react|rails> <project-name> [--github] [--public]
+# create-claude-project <react|rails|react-rails> <project-name> [options] [-- <rails new args>]
 #
-# Scaffolds a new project directory with the AI-assisted engineering baseline:
-# lean CLAUDE.md, specialist subagents, enforcement hooks (no direct work on
-# main, worktree-per-change), OpenSpec workflow, and a GitHub repo whose main
-# branch only accepts pull requests.
+# Scaffolds a new project directory with a real application AND the
+# AI-assisted engineering baseline: lean CLAUDE.md, specialist subagents,
+# enforcement hooks (no direct work on main, worktree-per-change), OpenSpec
+# workflow, and optionally a GitHub repo whose main branch only accepts PRs.
+#
+#   rails: `rails new` with whatever ruby/rails is active, defaulting to
+#          PostgreSQL + Tailwind, plus Devise installed and configured.
+#          Development is Dockerized: docker-compose runs the app with
+#          postgres and redis on a named network, and every toolchain step
+#          (bundle, tailwind, devise, db:prepare) happens in containers —
+#          nothing depends on a host-installed database.
+#   react: Vite (react-ts) + React Router, TanStack Query, Zustand,
+#          React Hook Form + Zod, Axios client with interceptors, Tailwind,
+#          Vitest + React Testing Library (+ MSW), Prettier — all managed
+#          with bun. Ships a dev container that can join another compose
+#          project's network (e.g. a Rails backend) via the dev-server /api
+#          proxy.
+#   react-rails: a <name>/ folder holding both — <name>-api (Rails API-only
+#          + postgres/redis/sidekiq worker) and <name>-client (React), each
+#          its own repo with the full baseline, wired together with working
+#          sign-up/login (httpOnly session cookie by default; --jwt switches
+#          to a 15-min JWT access token + rotating refresh token). In Docker
+#          the client joins the API's compose network and proxies /api/* to
+#          it, so the browser keeps a single origin.
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: create-claude-project <type> <name> [options]
+Usage: create-claude-project <type> <name> [options] [-- <rails new args>]
 
-  type      react | rails
+  type      react | rails | react-rails
   name      project name: lowercase letters/digits, - or _ separated
             (e.g. my-app, my_app)
 
 Options:
-  --github      Also create a GitHub repo, push main, and enable branch
-                protection (default: local-only, no remote — Claude never
-                commits; you review, commit, and merge)
-  --public      With --github: create the repo public (default: private)
-  -h, --help    Show this help
+  --github        Also create a GitHub repo, push main, and enable branch
+                  protection (default: local-only, no remote — Claude never
+                  commits; you review, commit, and merge)
+  --public        With --github: create the repo public (default: private)
+  --jwt           react-rails: use JWT (15-min access token in memory) with
+                  rotating refresh tokens instead of the default
+                  session-cookie auth
+  --tanstack      react / react-rails: use TanStack Router (code-based
+                  routes) instead of the default React Router v7
+  --skip-devise   rails: do not add/configure Devise
+  --skip-docker   Do not Dockerize: rails runs bundle/devise/db on the host
+                  toolchain (needs bundler + a reachable PostgreSQL); react
+                  skips the dev-container files
+  --skip-app      Do not generate an application — only lay down the Claude
+                  baseline in an empty repo (not supported for react-rails)
+  -h, --help      Show this help
+  --              rails / react-rails: everything after -- is passed straight
+                  to `rails new` (--database=postgresql and --css=tailwind
+                  are added unless you supply your own database/css/api flags)
+
+What gets generated (in addition to the Claude baseline):
+  rails   `rails new` using the active ruby/rails; PostgreSQL + Tailwind by
+          default; Devise installed (gem + devise:install + mailer URL
+          config) with Tailwind-styled views. Dockerized dev: Dockerfile.dev
+          + docker-compose.yml (app/db/redis on the <name>_dev network) +
+          scripts/docker-setup, which builds the image and installs
+          gems/tailwind/devise/database entirely in containers.
+  react   Vite react-ts app (managed with bun) with React Router, TanStack
+          Query, Zustand, React Hook Form + Zod, Axios (request/response
+          interceptors), Tailwind v4, Vitest + React Testing Library + MSW,
+          Prettier. Dockerized dev: Dockerfile.dev + docker-compose.yml with
+          a commented-in switch to join a backend's compose network.
+  react-rails
+          ./<name>/ containing <name>-api (rails --api + postgres + redis +
+          sidekiq worker) and <name>-client (react as above), each its own
+          git repo with the full baseline, plus a parent README. Sign-up/
+          login is wired end to end: session-cookie auth by default (CSRF
+          token flow included), or --jwt for access + rotating refresh
+          tokens. Dockerized by default; the client's compose file joins the
+          API's <name>-api_dev network and the Vite dev server proxies
+          /api/* to http://app:3000.
 
 The new project is created as ./<name> inside the current directory.
 After creation, cd into it and run `claude` — the first session runs a
@@ -32,21 +88,49 @@ EOF
 die() { echo "error: $*" >&2; exit 1; }
 warn() { echo "warning: $*" >&2; }
 
-TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=0
-for arg in "$@"; do
-  case "$arg" in
+TYPE="" NAME="" VISIBILITY="--private" USE_GITHUB=0 SKIP_DEVISE=0 SKIP_APP=0 SKIP_DOCKER=0 JWT=0 TANSTACK=0
+# react-rails internals: the orchestrating run re-invokes this script per app
+# with --internal-* flags carrying the auth wiring context.
+ROLE="" AUTH_MODE="" PEER=""
+PASSTHRU=()
+while [ $# -gt 0 ]; do
+  case "$1" in
     -h|--help) usage; exit 0 ;;
     --github) USE_GITHUB=1 ;;
     --public) VISIBILITY="--public" ;;
-    -*) die "unknown option: $arg" ;;
-    *) if [ -z "$TYPE" ]; then TYPE="$arg"; elif [ -z "$NAME" ]; then NAME="$arg"; else die "unexpected argument: $arg"; fi ;;
+    --jwt) JWT=1 ;;
+    --tanstack) TANSTACK=1 ;;
+    --skip-devise) SKIP_DEVISE=1 ;;
+    --skip-docker) SKIP_DOCKER=1 ;;
+    --skip-app) SKIP_APP=1 ;;
+    --internal-role=*) ROLE="${1#*=}" ;;
+    --internal-mode=*) AUTH_MODE="${1#*=}" ;;
+    --internal-peer=*) PEER="${1#*=}" ;;
+    --) shift; while [ $# -gt 0 ]; do PASSTHRU+=("$1"); shift; done; break ;;
+    -*) die "unknown option: $1" ;;
+    *) if [ -z "$TYPE" ]; then TYPE="$1"; elif [ -z "$NAME" ]; then NAME="$1"; else die "unexpected argument: $1"; fi ;;
   esac
+  shift
 done
 
 [ "$VISIBILITY" = "--public" ] && [ "$USE_GITHUB" = 0 ] && warn "--public has no effect without --github"
 [ -n "$TYPE" ] && [ -n "$NAME" ] || { usage; exit 1; }
-case "$TYPE" in react|rails) ;; *) die "type must be 'react' or 'rails', got '$TYPE'" ;; esac
+case "$TYPE" in react|rails|react-rails) ;; *) die "type must be 'react', 'rails', or 'react-rails', got '$TYPE'" ;; esac
 [[ "$NAME" =~ ^[a-z0-9]+([-_][a-z0-9]+)*$ ]] || die "invalid name '$NAME' (lowercase letters/digits, - or _ separated)"
+if [ "${#PASSTHRU[@]}" -gt 0 ]; then
+  case "$TYPE" in rails|react-rails) ;; *) die "arguments after -- are only supported for rails/react-rails (they are passed to 'rails new')" ;; esac
+  [ "$SKIP_APP" = 0 ] || die "--skip-app and rails-new passthrough arguments are mutually exclusive"
+fi
+[ "$SKIP_DEVISE" = 1 ] && [ "$TYPE" != rails ] && warn "--skip-devise has no effect for $TYPE"
+[ "$JWT" = 1 ] && [ "$TYPE" != react-rails ] && die "--jwt is only supported for react-rails"
+[ "$TANSTACK" = 1 ] && [ "$TYPE" = rails ] && [ -z "$ROLE" ] && die "--tanstack is only supported for react/react-rails"
+[ "$TYPE" = react-rails ] && [ "$SKIP_APP" = 1 ] && die "--skip-app is not supported for react-rails"
+if [ -n "$ROLE" ]; then
+  case "$ROLE" in api|client) ;; *) die "internal error: bad --internal-role '$ROLE'" ;; esac
+  case "$AUTH_MODE" in session|jwt) ;; *) die "internal error: bad --internal-mode '$AUTH_MODE'" ;; esac
+  # react-rails auth is hand-rolled (has_secure_password), never Devise.
+  [ "$ROLE" = api ] && SKIP_DEVISE=1
+fi
 
 TARGET="$PWD/$NAME"
 [ -e "$TARGET" ] && die "$TARGET already exists"
@@ -58,18 +142,97 @@ if [ -L "$REAL_SCRIPT" ]; then REAL_SCRIPT="$(readlink "$REAL_SCRIPT")"; case "$
 ROOT="$(cd "$(dirname "$REAL_SCRIPT")/.." && pwd)"
 TEMPLATES="$ROOT/templates"
 [ -d "$TEMPLATES/shared" ] && [ -d "$TEMPLATES/$TYPE" ] || die "templates not found under $ROOT/templates"
+if [ "$TYPE" = react-rails ]; then
+  for d in rails react rails-app react-app react-rails; do
+    [ -d "$TEMPLATES/$d" ] || die "templates not found under $TEMPLATES/$d"
+  done
+elif [ "$SKIP_APP" = 0 ]; then
+  [ -d "$TEMPLATES/$TYPE-app" ] || die "templates not found under $TEMPLATES/$TYPE-app"
+fi
+if [ "$SKIP_APP" = 0 ] && [ "$TYPE" = rails ] && [ "$SKIP_DEVISE" = 0 ]; then
+  [ -d "$TEMPLATES/rails-devise" ] || die "templates not found under $TEMPLATES/rails-devise"
+fi
+if [ "$TANSTACK" = 1 ] && [ "$SKIP_APP" = 0 ]; then
+  [ -d "$TEMPLATES/react-app-tanstack" ] || die "templates not found under $TEMPLATES/react-app-tanstack"
+fi
 
-# --- Node >= 20 (needed by the openspec CLI) --------------------------------
-node_ok() { command -v node >/dev/null 2>&1 && node -e 'process.exit(+process.versions.node.split(".")[0]>=20?0:1)' 2>/dev/null; }
+# --- Node >= 22 (openspec CLI; vitest's jsdom/undici need >= 22.11) ----------
+node_ok() { command -v node >/dev/null 2>&1 && node -e 'process.exit(+process.versions.node.split(".")[0]>=22?0:1)' 2>/dev/null; }
 if ! node_ok; then
   best=""
   for d in "$HOME"/.nvm/versions/node/v*/bin; do
     [ -x "$d/node" ] || continue
-    "$d/node" -e 'process.exit(+process.versions.node.split(".")[0]>=20?0:1)' 2>/dev/null && best="$d"
+    "$d/node" -e 'process.exit(+process.versions.node.split(".")[0]>=22?0:1)' 2>/dev/null && best="$d"
   done
   [ -n "$best" ] && PATH="$best:$PATH"
 fi
-node_ok || die "node >= 20 is required (for the openspec CLI). Install one, e.g.: nvm install 20"
+node_ok || die "node >= 22 is required (for the openspec CLI and the react test toolchain). Install one, e.g.: nvm install 24"
+command -v npm >/dev/null 2>&1 || die "npm not found on PATH"
+NODE_MAJOR="$(node -e 'process.stdout.write(process.versions.node.split(".")[0])')"
+RUBY_V=""
+
+# An EOL ruby is a bad base for a new app: its Docker base image sits on an
+# EOL Debian whose apt repositories are gone (image builds fail), and an old
+# ruby caps which Rails `rails new` can use. Warn and ask before proceeding.
+RAILS_MIN_RUBY="3.2"   # minimum ruby for current Rails (Rails 8)
+check_ruby_freshness() {
+  local v series minor today eol=0 old_for_rails=0
+  v="$(ruby -e 'print RUBY_VERSION' 2>/dev/null)" || return 0
+  series="${v%.*}"
+  case "$series" in
+    [12].*) eol=1 ;;
+    3.*)
+      minor="${series#3.}"
+      case "$minor" in *[!0-9]*) minor="" ;; esac
+      # Ruby 3.x series go EOL on March 31 of year 2024+minor (3.0 -> 2024,
+      # 3.1 -> 2025, ...); close enough for a warning.
+      today="$(date +%Y%m%d)"
+      [ -n "$minor" ] && [ "$today" -ge "$((2024 + minor))0331" ] && eol=1
+      ;;
+  esac
+  ruby -e "exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('$RAILS_MIN_RUBY') ? 0 : 1)" 2>/dev/null \
+    || old_for_rails=1
+  [ "$eol" = 0 ] && [ "$old_for_rails" = 0 ] && return 0
+
+  if [ "$eol" = 1 ]; then
+    if [ "$SKIP_DOCKER" = 0 ]; then
+      warn "active ruby $v is end-of-life — no security fixes, and the ruby:$v Docker image is built on an old Debian whose apt repositories get removed at Debian EOL, so the dev image build may fail (apt-get: 'does not have a Release file')"
+    else
+      warn "active ruby $v is end-of-life (no security fixes)"
+    fi
+  fi
+  [ "$old_for_rails" = 1 ] && warn "active ruby $v is below current Rails' minimum (Rails 8 needs ruby >= $RAILS_MIN_RUBY) — 'rails new' will use an older Rails"
+  warn "recommended: switch to a current ruby and re-run (e.g. rvm use 3.4 / rbenv shell 3.4), with rails installed for it (gem install rails)"
+
+  local reply=""
+  if { printf 'Continue with ruby %s anyway? [y/N] ' "$v" >/dev/tty && read -r reply </dev/tty; } 2>/dev/null; then
+    case "$reply" in [yY]|[yY][eE][sS]) ;; *) die "aborted — switch ruby and re-run" ;; esac
+  else
+    warn "no terminal to confirm on; continuing with ruby $v"
+  fi
+}
+
+# --- Type-specific toolchain checks (fail before creating anything) ----------
+if [ "$SKIP_APP" = 0 ] && { [ "$TYPE" = rails ] || [ "$TYPE" = react-rails ]; }; then
+  command -v ruby >/dev/null 2>&1 || die "ruby not found on PATH"
+  command -v rails >/dev/null 2>&1 \
+    || die "rails not found for the active ruby ($(ruby -e 'print RUBY_VERSION' 2>/dev/null)). Install it first: gem install rails"
+  # Only the non-docker flow bundles on the host.
+  if [ "$SKIP_DOCKER" = 1 ]; then
+    command -v bundle >/dev/null 2>&1 || die "bundler not found for the active ruby. Install it first: gem install bundler"
+  fi
+  # react-rails delegates the interactive freshness check to its rails child
+  # run, so the user is only prompted once.
+  [ "$TYPE" = rails ] && check_ruby_freshness
+fi
+if [ "$SKIP_APP" = 0 ] && { [ "$TYPE" = react ] || [ "$TYPE" = react-rails ]; }; then
+  command -v bun >/dev/null 2>&1 \
+    || die "bun not found on PATH (react apps are managed with bun). Install it: curl -fsSL https://bun.sh/install | bash"
+fi
+
+docker_ok() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+}
 
 # --- openspec CLI ------------------------------------------------------------
 if ! command -v openspec >/dev/null 2>&1; then
@@ -77,23 +240,425 @@ if ! command -v openspec >/dev/null 2>&1; then
   npm install -g @fission-ai/openspec >/dev/null 2>&1 || die "failed to install @fission-ai/openspec"
 fi
 
-# --- Scaffold ----------------------------------------------------------------
+# --- react-rails: orchestrate a rails API + react client pair ----------------
+# The parent folder is NOT a git repo — it holds two independent repos, each
+# scaffolded by re-invoking this script with --internal-* flags that wire the
+# auth templates in before the child's initial commit.
+if [ "$TYPE" = react-rails ]; then
+  AUTH_MODE=session
+  [ "$JWT" = 1 ] && AUTH_MODE=jwt
+  API_NAME="$NAME-api" CLIENT_NAME="$NAME-client"
+  SELF="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)/$(basename "$REAL_SCRIPT")"
+
+  fwd=()
+  [ "$USE_GITHUB" = 1 ] && fwd+=(--github)
+  [ "$VISIBILITY" = "--public" ] && fwd+=(--public)
+  [ "$SKIP_DOCKER" = 1 ] && fwd+=(--skip-docker)
+
+  mkdir -p "$TARGET"
+  echo "Creating $NAME (react-rails: $API_NAME + $CLIENT_NAME, $AUTH_MODE auth) ..."
+  (cd "$TARGET" && "$SELF" rails "$API_NAME" \
+      --internal-role=api "--internal-mode=$AUTH_MODE" "--internal-peer=$CLIENT_NAME" \
+      ${fwd[@]+"${fwd[@]}"} -- ${PASSTHRU[@]+"${PASSTHRU[@]}"}) \
+    || die "rails API generation failed (see output above)"
+  client_fwd=()
+  [ "$TANSTACK" = 1 ] && client_fwd+=(--tanstack)
+  (cd "$TARGET" && "$SELF" react "$CLIENT_NAME" \
+      --internal-role=client "--internal-mode=$AUTH_MODE" "--internal-peer=$API_NAME" \
+      ${fwd[@]+"${fwd[@]}"} ${client_fwd[@]+"${client_fwd[@]}"}) \
+    || die "react client generation failed (see output above)"
+
+  cp "$TEMPLATES/react-rails/parent-$AUTH_MODE/README.md" "$TARGET/README.md"
+  perl -pi -e "s/\\{\\{PROJECT_NAME\\}\\}/$NAME/g; s/\\{\\{API_NAME\\}\\}/$API_NAME/g; s/\\{\\{CLIENT_NAME\\}\\}/$CLIENT_NAME/g" \
+    "$TARGET/README.md"
+
+  RUN_API="scripts/docker-setup, then: docker compose up"
+  RUN_CLIENT="docker compose up   (start the API first — it creates the shared network)"
+  if [ "$SKIP_DOCKER" = 1 ]; then
+    RUN_API="bin/rails server"
+    RUN_CLIENT="bun run dev"
+  fi
+  cat <<EOF
+
+Done: $TARGET (react-rails, two repos + parent README)
+  api:     $API_NAME/     rails API-only + postgres/redis/sidekiq worker
+  client:  $CLIENT_NAME/  react (vite + bun); /api proxied to the API
+  auth:    $AUTH_MODE$(if [ "$AUTH_MODE" = jwt ]; then echo " (15-min access token + rotating refresh token)"; else echo " (httpOnly session cookie + CSRF token)"; fi) — sign-up/login wired end to end
+
+Next steps:
+  cd $NAME/$API_NAME    && $RUN_API
+  cd $NAME/$CLIENT_NAME && $RUN_CLIENT
+  open http://localhost:5173
+
+Each app is its own repo with the full Claude baseline — run \`claude\` in
+each to run its project interview. See $NAME/README.md for the auth details.
+EOF
+  exit 0
+fi
+
+# --- Template overlay helpers ------------------------------------------------
+# Copy a template tree onto the target, tracking every file written so that
+# {{...}} substitution later touches ONLY template-derived files (never the
+# generated app, node_modules, etc.). Template files overwrite generated ones
+# at the same path, except .gitignore which is append-merged.
+COPIED=()
+overlay_tree() {
+  local src="$1" rel dest
+  while IFS= read -r -d '' f; do
+    rel="${f#"$src"/}"
+    dest="$TARGET/$rel"
+    if [ "$rel" = "gitignore" ]; then
+      dest="$TARGET/.gitignore"
+      if [ -f "$dest" ]; then merge_gitignore "$f"; continue; fi
+    fi
+    [ "$rel" = "dockerignore" ] && dest="$TARGET/.dockerignore"
+    mkdir -p "$(dirname "$dest")"
+    cp "$f" "$dest"
+    COPIED+=("$dest")
+  done < <(find "$src" -type f -print0)
+}
+
+# Append template gitignore lines the generated .gitignore doesn't have.
+merge_gitignore() {
+  local tmpl="$1" line added=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in \#*) continue ;; esac
+    grep -qxF "$line" "$TARGET/.gitignore" && continue
+    if [ "$added" = 0 ]; then
+      printf '\n# --- added by create-claude-project ---\n' >>"$TARGET/.gitignore"
+      added=1
+    fi
+    printf '%s\n' "$line" >>"$TARGET/.gitignore"
+  done <"$tmpl"
+  return 0
+}
+
+# rails new leaves the layout body bare — no container, no flash rendering.
+# Wrap yield in a centered Tailwind container and render flash messages. (The
+# Dockerized flow does the same in scripts/docker-setup.)
+wrap_layout_main() {
+  [ -f app/views/layouts/application.html.erb ] || return 0
+  grep -q '<%= notice %>' app/views/layouts/application.html.erb && return 0
+  perl -pi -e 's{^(\s*)(<%= yield %>)$}{$1<main class="mx-auto max-w-4xl px-4 py-8">\n$1  <% if notice %><p class="mb-4 rounded-md bg-green-50 px-4 py-3 text-sm text-green-800"><%= notice %></p><% end %>\n$1  <% if alert %><p class="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-800"><%= alert %></p><% end %>\n$1  $2\n$1</main>}' \
+    app/views/layouts/application.html.erb
+}
+
+ensure_main_branch() {
+  if [ ! -d "$TARGET/.git" ]; then
+    git init -q -b main 2>/dev/null || { git init -q && git symbolic-ref HEAD refs/heads/main; }
+  elif [ "$(git symbolic-ref --short HEAD 2>/dev/null || true)" != "main" ]; then
+    git symbolic-ref HEAD refs/heads/main
+  fi
+}
+
+# --- Application generation --------------------------------------------------
+DB_STATE="n/a" DEVISE_STATE="n/a" DOCKER_STATE="n/a" APP_STATE="none (--skip-app)" AUTH_STATE="n/a"
+RAILS_MM=""
+
+# react-rails API role: wire the hand-rolled auth around the generated app —
+# gems and middleware here; controllers/models/routes/migrations arrive via
+# the templates/react-rails overlays in the main flow. Runs from inside the
+# generated app directory, before its initial commit.
+configure_api_auth() {
+  [ "$ROLE" = api ] || return 0
+
+  # bcrypt for has_secure_password, rack-cors for the client's direct-access
+  # mode; rails new ships both commented out.
+  perl -pi -e 's/^# (gem "bcrypt".*)$/$1/' Gemfile
+  grep -q '^gem "bcrypt"' Gemfile || printf '\n# has_secure_password\ngem "bcrypt", "~> 3.1.7"\n' >>Gemfile
+  perl -pi -e 's/^# (gem "rack-cors".*)$/$1/' Gemfile
+  grep -q '^gem "rack-cors"' Gemfile || printf '\ngem "rack-cors"\n' >>Gemfile
+  if [ "$AUTH_MODE" = jwt ]; then
+    printf '\n# JSON Web Tokens for the access-token layer\ngem "jwt"\n' >>Gemfile
+  fi
+
+  # API mode strips the cookie/session middleware; auth needs (some of) it
+  # back — see docs/auth.md in the generated app.
+  if [ "$AUTH_MODE" = jwt ]; then
+    perl -pi -e 's/^(\s*)(config\.api_only = true)$/$1$2\n\n$1# Auth is a Bearer access token (no session), but the refresh token\n$1# travels in an httpOnly cookie, so add the cookie middleware back.\n$1config.middleware.use ActionDispatch::Cookies/' \
+      config/application.rb
+  else
+    SESSION_KEY="_${NAME//-/_}_session" perl -pi -e 's/^(\s*)(config\.api_only = true)$/$1$2\n\n$1# API mode strips cookie\/session middleware; auth here is an httpOnly\n$1# encrypted session cookie, so add it back. same_site: :lax works because\n$1# the client dev-server proxy keeps SPA and API on one origin (and prod\n$1# should share a parent domain).\n$1config.middleware.use ActionDispatch::Cookies\n$1config.middleware.use ActionDispatch::Session::CookieStore,\n$1  key: "$ENV{SESSION_KEY}", same_site: :lax, secure: Rails.env.production?/' \
+      config/application.rb
+  fi
+
+  # The compose worker service runs sidekiq against the redis service.
+  if [ "$SKIP_DOCKER" = 0 ]; then
+    printf '\n# Background jobs (compose worker service)\ngem "sidekiq"\n' >>Gemfile
+    perl -pi -e 's/^(Rails\.application\.configure do)$/$1\n  # Jobs run in the compose worker service (sidekiq + redis).\n  config.active_job.queue_adapter = :sidekiq/' \
+      config/environments/development.rb
+  fi
+
+  if [ "$AUTH_MODE" = jwt ]; then
+    AUTH_STATE="jwt — 15-min access token + rotating refresh token (docs/auth.md)"
+  else
+    AUTH_STATE="session — httpOnly cookie + CSRF token (docs/auth.md)"
+  fi
+  DEVISE_STATE="n/a (react-rails uses hand-rolled auth)"
+}
+
+generate_rails_app() {
+  local defaults=() a has_db=0 has_css=0 api_mode=0 has_api_flag=0
+  [ "$ROLE" = api ] && api_mode=1
+  if [ "${#PASSTHRU[@]}" -gt 0 ]; then
+    for a in "${PASSTHRU[@]}"; do
+      case "$a" in
+        -d|-d=*|--database|--database=*) has_db=1 ;;
+        -c|-c=*|--css|--css=*) has_css=1 ;;
+        --api) api_mode=1 has_api_flag=1 ;;
+      esac
+    done
+  fi
+  [ "$has_db" = 0 ] && defaults+=(--database=postgresql)
+  [ "$has_css" = 0 ] && [ "$api_mode" = 0 ] && defaults+=(--css=tailwind)
+  [ "$ROLE" = api ] && [ "$has_api_flag" = 0 ] && defaults+=(--api)
+
+  RUBY_V="$(ruby -e 'print RUBY_VERSION')"
+  RAILS_MM="$(rails --version 2>/dev/null | perl -ne 'print $1 if /(\d+\.\d+)/')"
+  APP_STATE="$(rails --version) (ruby $RUBY_V)"
+
+  if [ "$SKIP_DOCKER" = 0 ]; then
+    # Docker mode: generate without bundling — gems, tailwind, devise, and
+    # the database are all set up inside containers by scripts/docker-setup,
+    # so no gem native extensions or database ever touch the host.
+    echo "Generating Rails app with $APP_STATE (Dockerized dev) ..."
+    rails new "$NAME" --skip-bundle ${defaults[@]+"${defaults[@]}"} ${PASSTHRU[@]+"${PASSTHRU[@]}"} \
+      || die "rails new failed (see output above). Remove $TARGET before retrying."
+    cd "$TARGET"
+    ensure_main_branch
+
+    # Point Active Record at the compose network when the env vars are set;
+    # with them unset the file behaves exactly as generated.
+    if grep -q '^  adapter: postgresql$' config/database.yml 2>/dev/null; then
+      perl -pi -e 's/^(  adapter: postgresql)$/$1\n  host: <%= ENV["DB_HOST"] %>\n  username: <%= ENV["DB_USERNAME"] %>\n  password: <%= ENV["DB_PASSWORD"] %>/' \
+        config/database.yml
+    fi
+
+    if [ "$SKIP_DEVISE" = 0 ]; then
+      printf '\n# Authentication\ngem "devise"\n' >>Gemfile
+      DEVISE_STATE="gem added, tailwind-styled views in app/views/devise (devise:install runs in scripts/docker-setup)"
+    else
+      DEVISE_STATE="skipped (--skip-devise)"
+    fi
+    configure_api_auth
+    DB_STATE="pending scripts/docker-setup"
+
+    overlay_tree "$TEMPLATES/rails-app"
+    # Devise renders these over its gem defaults; no `rails g devise:views`
+    # (which produces unstyled markup) is needed.
+    if [ "$SKIP_DEVISE" = 0 ]; then overlay_tree "$TEMPLATES/rails-devise"; fi
+    return 0
+  fi
+
+  DOCKER_STATE="skipped (--skip-docker)"
+  echo "Generating Rails app with $APP_STATE ..."
+  rails new "$NAME" ${defaults[@]+"${defaults[@]}"} ${PASSTHRU[@]+"${PASSTHRU[@]}"} \
+    || die "rails new failed (see output above). Remove $TARGET before retrying."
+  cd "$TARGET"
+  ensure_main_branch
+  wrap_layout_main
+  configure_api_auth
+  if [ "$ROLE" = api ]; then
+    # rails new bundled before the auth gems were added; catch up.
+    echo "Installing auth gems ..."
+    bundle install >/dev/null || warn "bundle install failed — run it manually in $TARGET"
+  fi
+
+  if [ "$SKIP_DEVISE" = 0 ]; then
+    echo "Adding Devise ..."
+    if bundle add devise; then
+      if bin/rails generate devise:install; then
+        # Apply devise's manual setup steps where they are unambiguous:
+        # mailer URL options in development. (Flash messages are rendered by
+        # the layout wrap above; the root route is left to the interview.)
+        perl -pi -e 's/^(Rails\.application\.configure do)$/$1\n  # Devise: mailers need default URL options.\n  config.action_mailer.default_url_options = { host: "localhost", port: 3000 }/' \
+          config/environments/development.rb
+        # Devise's generated initializer doesn't match rubocop-rails-omakase
+        # style (Rails >= 7.2 ships rubocop); autocorrect so the repo starts
+        # clean under its own lint gate.
+        if grep -q rubocop Gemfile.lock 2>/dev/null; then
+          bundle exec rubocop -A config/initializers/devise.rb >/dev/null 2>&1 || true
+        fi
+        DEVISE_STATE="installed — generate a model when the domain is decided: bin/rails generate devise <Model>"
+      else
+        warn "devise:install generator failed; run it manually: bin/rails generate devise:install"
+        DEVISE_STATE="gem added, generator FAILED — run: bin/rails generate devise:install"
+      fi
+    else
+      warn "bundle add devise failed; add it manually."
+      DEVISE_STATE="NOT installed — run: bundle add devise && bin/rails generate devise:install"
+    fi
+    # Tailwind-styled devise views: rendered over devise's unstyled gem
+    # defaults; no `rails g devise:views` needed.
+    overlay_tree "$TEMPLATES/rails-devise"
+  elif [ "$ROLE" != api ]; then
+    DEVISE_STATE="skipped (--skip-devise)"
+  fi
+
+  if [ "$ROLE" = api ]; then
+    # The auth migrations arrive via the react-rails overlays later in the
+    # main flow (after {{...}} substitution); db:prepare runs there.
+    DB_STATE="pending auth overlays"
+  else
+    echo "Preparing the database ..."
+    if bin/rails db:prepare >/dev/null 2>&1; then
+      DB_STATE="created (bin/rails db:prepare)"
+    else
+      warn "could not create the database (is PostgreSQL running?). Run bin/rails db:prepare later."
+      DB_STATE="NOT created — start PostgreSQL, then: bin/rails db:prepare"
+    fi
+  fi
+}
+
+generate_react_app() {
+  local router_pkg=react-router-dom router_label="React Router"
+  if [ "$TANSTACK" = 1 ]; then
+    router_pkg=@tanstack/react-router router_label="TanStack Router"
+  fi
+  APP_STATE="Vite react-ts (bun) + $router_label/Query/Zustand/RHF+Zod/Axios/Tailwind/Vitest"
+  echo "Generating React app with Vite (react-ts template, bun) ..."
+  bun x create-vite@latest "$NAME" --template react-ts >/dev/null \
+    || die "Vite scaffold failed. Remove $TARGET before retrying."
+  cd "$TARGET"
+  ensure_main_branch
+
+  echo "Installing dependencies with bun (router, query, zustand, forms, axios, tailwind, testing) ..."
+  bun install >/dev/null
+  bun add \
+    "$router_pkg" @tanstack/react-query zustand react-hook-form zod @hookform/resolvers axios >/dev/null
+  bun add --dev \
+    tailwindcss @tailwindcss/vite vitest jsdom @testing-library/react @testing-library/jest-dom @testing-library/user-event msw prettier @types/node \
+    eslint @eslint/js typescript-eslint eslint-plugin-react-hooks eslint-plugin-react-refresh eslint-config-prettier globals >/dev/null
+  # The scaffold's lint gate is type-aware ESLint (see eslint.config.js in
+  # the overlay); drop the Vite template's oxlint setup if it shipped one.
+  bun remove oxlint eslint-plugin-oxlint >/dev/null 2>&1 || true
+  rm -f .oxlintrc.json
+
+  # Full strictness plus noUncheckedIndexedAccess (arr[i] is T | undefined);
+  # recent create-vite templates ship without "strict" entirely.
+  perl -pi -e 's/^(\s*)"compilerOptions": \{$/$1"compilerOptions": {\n$1  "strict": true,\n$1  "noUncheckedIndexedAccess": true,/' \
+    tsconfig.app.json tsconfig.node.json 2>/dev/null || true
+
+  # Overlay the app scaffold: router, query client, axios interceptors,
+  # zustand store, tailwind entry, vitest config + MSW test setup, dev
+  # container (Dockerfile.dev + docker-compose.yml).
+  rm -f src/App.css
+  overlay_tree "$TEMPLATES/react-app"
+  # TanStack Router variant: replaces router.tsx/main.tsx/App.tsx (code-based
+  # routes; file-based routing is an easy later upgrade).
+  [ "$TANSTACK" = 1 ] && overlay_tree "$TEMPLATES/react-app-tanstack"
+  if [ "$SKIP_DOCKER" = 1 ]; then
+    rm -f Dockerfile.dev docker-compose.yml .dockerignore docs/dev-environment.md
+    DOCKER_STATE="skipped (--skip-docker)"
+  else
+    DOCKER_STATE="dev container ready (docker compose up; image builds on first run)"
+  fi
+
+  node -e '
+    const fs = require("fs");
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    Object.assign(pkg.scripts, {
+      lint: "eslint .",
+      test: "vitest run",
+      "test:watch": "vitest",
+      typecheck: "tsc -b",
+      "typecheck:watch": "tsc -b --watch",
+      format: "prettier --write src",
+      "format:check": "prettier --check src",
+    });
+    fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+  '
+  perl -pi -e "s{<title>.*</title>}{<title>$NAME</title>}" index.html
+}
+
 echo "Creating $NAME ($TYPE) ..."
-mkdir -p "$TARGET"
-cd "$TARGET"
-git init -q -b main 2>/dev/null || { git init -q && git symbolic-ref HEAD refs/heads/main; }
+if [ "$SKIP_APP" = 1 ]; then
+  mkdir -p "$TARGET"
+  cd "$TARGET"
+  ensure_main_branch
+elif [ "$TYPE" = rails ]; then
+  generate_rails_app
+else
+  generate_react_app
+fi
 
-cp -R "$TEMPLATES/shared/." "$TARGET/"
-cp -R "$TEMPLATES/$TYPE/." "$TARGET/"
-cp -R "$TEMPLATES/create/." "$TARGET/"   # create-mode extras (greenfield interview skill)
-[ -f "$TARGET/gitignore" ] && mv "$TARGET/gitignore" "$TARGET/.gitignore"
+# --- Claude baseline overlay -------------------------------------------------
+overlay_tree "$TEMPLATES/shared"
+overlay_tree "$TEMPLATES/$TYPE"
+overlay_tree "$TEMPLATES/create"   # create-mode extras (greenfield interview skill)
 
-# Template substitution
-find "$TARGET" -type f -not -path "$TARGET/.git/*" -print0 \
-  | xargs -0 perl -pi -e "s/\\{\\{PROJECT_NAME\\}\\}/$NAME/g; s/\\{\\{PROJECT_TYPE\\}\\}/$TYPE/g; s/\\{\\{BOOTSTRAP_SKILL\\}\\}/project-interview/g"
+# react-rails auth wiring: controllers/models/routes for the API, auth store/
+# pages/API client for the react client, plus docker overrides (worker
+# service; client joins the API's network).
+if [ -n "$ROLE" ]; then
+  if [ "$ROLE" = client ]; then
+    AUTH_STATE="$AUTH_MODE — store/pages/API client wired (docs/auth.md)"
+  fi
+  overlay_tree "$TEMPLATES/react-rails/$ROLE-common"
+  overlay_tree "$TEMPLATES/react-rails/$ROLE-$AUTH_MODE"
+  # TanStack Router variant of the client router/layout/auth pages (the
+  # common overlay ships the React Router versions).
+  if [ "$ROLE" = client ] && [ "$TANSTACK" = 1 ]; then
+    overlay_tree "$TEMPLATES/react-rails/client-tanstack"
+  fi
+  if [ "$SKIP_DOCKER" = 0 ] && [ -d "$TEMPLATES/react-rails/$ROLE-docker" ]; then
+    overlay_tree "$TEMPLATES/react-rails/$ROLE-docker"
+  fi
+fi
+
+# Template substitution — only in files the overlays wrote (and that still
+# exist; --skip-docker removes some after they are copied).
+SUBST=()
+for f in ${COPIED[@]+"${COPIED[@]}"}; do [ -f "$f" ] && SUBST+=("$f"); done
+if [ "${#SUBST[@]}" -gt 0 ]; then
+  printf '%s\0' "${SUBST[@]}" \
+    | xargs -0 perl -pi -e "s/\\{\\{PROJECT_NAME\\}\\}/$NAME/g; s/\\{\\{PROJECT_TYPE\\}\\}/$TYPE/g; s/\\{\\{BOOTSTRAP_SKILL\\}\\}/project-interview/g; s/\\{\\{RUBY_VERSION\\}\\}/$RUBY_V/g; s/\\{\\{NODE_MAJOR\\}\\}/$NODE_MAJOR/g; s/\\{\\{RAILS_MIGRATION_VERSION\\}\\}/$RAILS_MM/g; s/\\{\\{PEER_NAME\\}\\}/$PEER/g"
+fi
 
 chmod +x "$TARGET"/scripts/setup "$TARGET"/scripts/protect-main \
   "$TARGET"/scripts/git-hooks/* "$TARGET"/scripts/claude-hooks/*.sh
+[ -f "$TARGET/scripts/docker-setup" ] && chmod +x "$TARGET/scripts/docker-setup"
+
+# react-rails API without docker: the auth migrations landed with the
+# overlays above (post-substitution), so the database is prepared here rather
+# than inside generate_rails_app.
+if [ "$TYPE" = rails ] && [ "$ROLE" = api ] && [ "$SKIP_APP" = 0 ] && [ "$SKIP_DOCKER" = 1 ]; then
+  echo "Preparing the database ..."
+  if bin/rails db:prepare >/dev/null 2>&1; then
+    DB_STATE="created (bin/rails db:prepare)"
+  else
+    warn "could not create the database (is PostgreSQL running?). Run bin/rails db:prepare later."
+    DB_STATE="NOT created — start PostgreSQL, then: bin/rails db:prepare"
+  fi
+fi
+
+# --- Dockerized dev environment setup (rails) --------------------------------
+# Everything below runs in containers via the generated scripts/docker-setup:
+# image build, bundle install, tailwind + devise installers, db:prepare.
+if [ "$TYPE" = rails ] && [ "$SKIP_APP" = 0 ] && [ "$SKIP_DOCKER" = 0 ]; then
+  if docker_ok; then
+    echo "Setting up the Dockerized dev environment (image, gems, tailwind, devise, database) ..."
+    if "$TARGET"/scripts/docker-setup; then
+      DOCKER_STATE="ready (docker compose up)"
+      DB_STATE="created in the db container (bin/rails db:prepare)"
+      [ "$SKIP_DEVISE" = 0 ] && DEVISE_STATE="installed — generate a model when the domain is decided: docker compose run --rm app bin/rails generate devise <Model>"
+    else
+      warn "scripts/docker-setup failed — fix the issue above, then re-run scripts/docker-setup (idempotent)."
+      DOCKER_STATE="files generated; setup FAILED — re-run scripts/docker-setup"
+      DB_STATE="NOT created — re-run scripts/docker-setup"
+    fi
+  else
+    warn "Docker (with the compose plugin) is not available/running; container setup skipped."
+    warn "Start Docker, then run: scripts/docker-setup"
+    DOCKER_STATE="files generated; Docker not running — run scripts/docker-setup"
+    DB_STATE="NOT created — run scripts/docker-setup"
+  fi
+fi
+
+if [ "$TYPE" = react ] && [ "$SKIP_APP" = 0 ]; then
+  bun x prettier --write src --log-level warn >/dev/null 2>&1 || true
+fi
 
 # --- OpenSpec init (generates /opsx:* commands + openspec-* skills) ----------
 echo "Initializing OpenSpec ..."
@@ -127,10 +692,19 @@ fi
 # Local git hooks last, so the scaffold's own commit/push above are not blocked.
 "$TARGET"/scripts/setup >/dev/null
 
+if [ "$TYPE" = react ]; then
+  RUN_CMD="bun run dev  (or in Docker: docker compose up)"
+  [ "$SKIP_DOCKER" = 1 ] && RUN_CMD="bun run dev"
+else
+  RUN_CMD="docker compose up"
+  [ "$SKIP_DOCKER" = 1 ] && RUN_CMD="bin/dev"
+fi
+
 cat <<EOF
 
 Done: $TARGET
   type:              $TYPE
+  app:               $APP_STATE$(if [ "$SKIP_APP" = 0 ]; then printf '\n  docker:            %s' "$DOCKER_STATE"; fi)$(if [ "$TYPE" = rails ] && [ "$SKIP_APP" = 0 ]; then printf '\n  database:          %s\n  devise:            %s' "$DB_STATE" "$DEVISE_STATE"; fi)$(if [ -n "$ROLE" ]; then printf '\n  auth:              %s' "$AUTH_STATE"; fi)
   openspec:          initialized (/opsx:explore, propose, apply, archive, sync, update)
   local guards:      git hooks + Claude hooks installed (no commits/merges/pushes on main; worktree per change)
   branch protection: $(if [ "$PROTECTED" = 1 ]; then echo "enabled (PRs required on main)"; elif [ "$USE_GITHUB" = 0 ]; then echo "n/a (local-only — re-run with --github, or add a remote later and run scripts/protect-main)"; else echo "NOT enabled — see warnings above"; fi)
@@ -143,6 +717,7 @@ Commit policy (detected at runtime from 'git remote'):
 
 Next steps:
   cd $NAME
+  $RUN_CMD        # run the app
   claude          # first session runs the project-interview skill to gather
                   # requirements and populate docs/, then the OpenSpec cycle begins:
                   # /opsx:explore -> /opsx:propose -> worktree + /opsx:apply -> review -> PR/owner-commit -> merge -> /opsx:archive

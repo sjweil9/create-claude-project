@@ -16,8 +16,10 @@ Expected documents (kept current by every change):
 | `code-standards.md` | pre-populated | Style, naming, linting, layer responsibilities |
 | `testing.md` | pre-populated | Test frameworks, coverage expectations, principles |
 | `deployment.md` | interview | Environments, deploy pipeline, secrets handling |
+| `dev-environment.md` | pre-populated (new projects) or onboarding | How to run the app and its toolchain locally (scaffolded apps ship a Dockerized setup) |
 | `ui-patterns.md` | pre-populated | UI/UX principles, theming, accessibility targets |
 | `schema.md` | interview | Database schema and data-model notes (rails projects) |
+| `auth.md` | pre-populated (react-rails pairs only) | How sign-up/login works in this half of the pair (session cookie or JWT + refresh token) |
 | `features/` | ongoing | One spec per shipped feature (kept in sync via OpenSpec archive) |
 
 Rules:

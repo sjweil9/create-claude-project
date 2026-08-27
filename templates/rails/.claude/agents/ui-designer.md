@@ -13,7 +13,7 @@ user flows, and visual consistency.
 
 ## Scope
 - `app/views/layouts/` and structural/layout concerns in `app/views/`
-- Styling theme configuration (Tailwind config)
+- Styling theme configuration (Tailwind theme/design tokens)
 - Navigation, page structure, responsive breakpoints
 - `docs/ui-patterns.md` (keep it current as patterns evolve)
 

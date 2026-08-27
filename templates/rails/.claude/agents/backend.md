@@ -34,5 +34,5 @@ presenters, serializers, API adapters, and application logic.
 
 ## Boundaries
 - Do NOT modify migrations or schema directly — coordinate with the database-reviewer agent
-- Do NOT write view templates, Stimulus controllers, or Tailwind classes — coordinate with the frontend agent
+- Do NOT write view templates, Stimulus controllers, or Tailwind markup — coordinate with the frontend agent
 - Do NOT modify Docker, CI/CD, or infrastructure config — coordinate with the devops agent

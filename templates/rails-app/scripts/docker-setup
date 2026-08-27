@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# One-time (but idempotent — safe to re-run) setup of the Dockerized dev
+# environment: builds the dev image, installs gems into the bundle volume,
+# finishes the installers `rails new --skip-bundle` deferred (tailwind,
+# devise), and creates the database. Everything runs in containers; the
+# host needs only Docker with the compose plugin.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+die() { echo "error: $*" >&2; exit 1; }
+run() { docker compose run --rm app "$@"; }
+
+command -v docker >/dev/null 2>&1 || die "docker not found"
+docker info >/dev/null 2>&1 || die "the docker daemon is not running"
+docker compose version >/dev/null 2>&1 || die "docker compose (v2 plugin) not found"
+
+echo "Building the dev image ..."
+docker compose build app
+
+echo "Starting database and redis ..."
+docker compose up -d db redis
+ok=0
+for _ in $(seq 1 30); do
+  docker compose exec -T db pg_isready -U postgres >/dev/null 2>&1 && { ok=1; break; }
+  sleep 1
+done
+[ "$ok" = 1 ] || die "PostgreSQL container did not become ready"
+
+echo "Installing gems ..."
+run bundle install
+
+# Finish installs that `rails new --skip-bundle` deferred. The default CSS
+# is Tailwind via tailwindcss-rails (standalone binary — no node involved);
+# the jsbundling/cssbundling branches only fire when the project was created
+# with explicit `rails new` flags that use them.
+if grep -q '"tailwindcss-rails"' Gemfile && [ ! -f app/assets/tailwind/application.css ]; then
+  echo "Installing Tailwind CSS ..."
+  run bin/rails tailwindcss:install
+fi
+if grep -q '"jsbundling-rails"' Gemfile && ! grep -q '"build":' package.json 2>/dev/null; then
+  echo "Installing esbuild (jsbundling) ..."
+  run bin/rails javascript:install:esbuild
+fi
+if grep -q '"cssbundling-rails"' Gemfile && ! grep -q '"build:css"' package.json 2>/dev/null; then
+  echo "Installing Bootstrap (cssbundling) ..."
+  run bin/rails css:install:bootstrap
+fi
+
+# rails new leaves the layout body bare — no container, no flash rendering.
+# Wrap yield in a centered Tailwind container and render flash messages.
+if [ -f app/views/layouts/application.html.erb ] && ! grep -q '<%= notice %>' app/views/layouts/application.html.erb; then
+  perl -pi -e 's{^(\s*)(<%= yield %>)$}{$1<main class="mx-auto max-w-4xl px-4 py-8">\n$1  <% if notice %><p class="mb-4 rounded-md bg-green-50 px-4 py-3 text-sm text-green-800"><%= notice %></p><% end %>\n$1  <% if alert %><p class="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-800"><%= alert %></p><% end %>\n$1  $2\n$1</main>}' \
+    app/views/layouts/application.html.erb
+fi
+
+if grep -Eq '^[[:space:]]*gem ["'\'']devise' Gemfile && [ ! -f config/initializers/devise.rb ]; then
+  echo "Installing Devise ..."
+  run bin/rails generate devise:install
+  # Apply devise's manual setup steps where they are unambiguous: mailer URL
+  # options in development. (Flash messages are rendered by the layout wrap
+  # above; the root route is left to the project interview.)
+  perl -pi -e 's/^(Rails\.application\.configure do)$/$1\n  # Devise: mailers need default URL options.\n  config.action_mailer.default_url_options = { host: "localhost", port: 3000 }/' \
+    config/environments/development.rb
+  # Devise's generated initializer doesn't match rubocop-rails-omakase style;
+  # autocorrect so the repo starts clean under its own lint gate.
+  if grep -q rubocop Gemfile.lock 2>/dev/null; then
+    run bundle exec rubocop -A config/initializers/devise.rb >/dev/null 2>&1 || true
+  fi
+fi
+
+echo "Preparing the database ..."
+run bin/rails db:prepare
+
+docker compose stop
+echo "docker-setup complete. Start the app with: docker compose up"

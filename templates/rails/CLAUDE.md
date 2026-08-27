@@ -10,7 +10,13 @@ first session replaces this section with a real project description.)
 
 Read the relevant docs before starting any work. See `docs/README.md` for the
 full map: `overview.md`, `architecture.md`, `schema.md`, `code-standards.md`,
-`testing.md`, `deployment.md`, `ui-patterns.md`, `features/`.
+`testing.md`, `deployment.md`, `dev-environment.md`, `ui-patterns.md`,
+`features/`.
+
+If `docs/dev-environment.md` describes a Dockerized environment, run every
+app command (rails, rubocop, tests, bundle) through it — e.g.
+`docker compose run --rm app bin/rails test` — never against a host
+toolchain. The quality-gate hooks already do this automatically.
 
 ## Standing Instructions
 

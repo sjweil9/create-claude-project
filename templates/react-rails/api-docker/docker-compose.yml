@@ -1,0 +1,96 @@
+# Development environment. `docker compose up` runs the API with PostgreSQL,
+# Redis, and a sidekiq worker on the {{PROJECT_NAME}}_dev network; one-time
+# setup (gems, database) is scripts/docker-setup. Nothing depends on a
+# host-installed database or toolchain.
+#
+# App commands run inside the container, e.g.:
+#   docker compose run --rm app bin/rails console
+#   docker compose run --rm app bundle exec rubocop
+#
+# The React client scaffolded alongside this app joins {{PROJECT_NAME}}_dev
+# as an external network and reaches the API at http://app:3000 through its
+# dev-server /api proxy.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: bin/dev
+    ports:
+      # Override the host port when 3000 is taken: APP_PORT=3100 docker compose up
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - bundle_cache:/usr/local/bundle
+      - node_modules:/app/node_modules
+    environment:
+      BINDING: 0.0.0.0
+      # Accept requests addressed to the compose service name, so other
+      # containers on the network (the React client's dev-server proxy) can
+      # call http://app:3000 without tripping host authorization.
+      RAILS_DEVELOPMENT_HOSTS: app
+      DB_HOST: db
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      REDIS_URL: redis://redis:6379/1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    stdin_open: true
+    tty: true
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: bundle exec sidekiq
+    volumes:
+      - .:/app
+      - bundle_cache:/usr/local/bundle
+      - node_modules:/app/node_modules
+    environment:
+      DB_HOST: db
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      REDIS_URL: redis://redis:6379/1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # Uncomment to reach the database from the host (psql, GUI clients):
+    # ports:
+    #   - "5432:5432"
+
+  redis:
+    image: redis:7
+    volumes:
+      - redis_data:/data
+    # Uncomment to reach redis from the host:
+    # ports:
+    #   - "6379:6379"
+
+networks:
+  default:
+    name: {{PROJECT_NAME}}_dev
+
+volumes:
+  bundle_cache:
+  node_modules:
+  postgres_data:
+  redis_data:

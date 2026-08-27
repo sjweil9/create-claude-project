@@ -16,11 +16,20 @@ this doc (framework swaps, coverage targets, whether e2e is configured).
 - **Component tests** — interactions and rendered behavior via Testing Library
 - **e2e tests** — critical user journeys only; keep the suite small and fast
 
+Pick the altitude by scope: **React Testing Library tests components** (one
+component or a small tree, network stubbed with MSW); **Playwright tests
+features** (a whole user journey — sign up, log in, complete the core flow —
+against the running app). Don't write RTL tests that wire up half the app to
+simulate a journey, and don't burn Playwright time on single-component
+states RTL covers in milliseconds.
+
 ## Principles
 
-- **Test behavior from the user's perspective** — query by role/label/text,
-  not by test IDs or implementation details; asserting on internal state or
-  mock call counts is a smell
+- **Test what the user sees, not implementation details** — query by
+  role/label/text, not by test IDs, component internals, or DOM structure;
+  asserting on internal state, hook return values, or mock call counts is a
+  smell. If a refactor that preserves behavior breaks the test, the test was
+  wrong.
 - Tests must be **deterministic** — fake timers and dates where time matters;
   no real network; no order-dependent tests
 - Never weaken assertions or delete tests to get green — surface the tradeoff

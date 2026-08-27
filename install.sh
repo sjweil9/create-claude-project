@@ -42,21 +42,39 @@ missing() { echo "  [MISSING] $1"; }
 command -v git >/dev/null 2>&1 && ok "git" || missing "git — required"
 
 node_ok=""
-if command -v node >/dev/null 2>&1 && node -e 'process.exit(+process.versions.node.split(".")[0]>=20?0:1)' 2>/dev/null; then
+if command -v node >/dev/null 2>&1 && node -e 'process.exit(+process.versions.node.split(".")[0]>=22?0:1)' 2>/dev/null; then
   node_ok=1
 else
   for d in "$HOME"/.nvm/versions/node/v*/bin; do
     [ -x "$d/node" ] || continue
-    "$d/node" -e 'process.exit(+process.versions.node.split(".")[0]>=20?0:1)' 2>/dev/null && node_ok=1
+    "$d/node" -e 'process.exit(+process.versions.node.split(".")[0]>=22?0:1)' 2>/dev/null && node_ok=1
   done
 fi
 if [ -n "$node_ok" ]; then
-  ok "node >= 20 (directly or via nvm; found automatically at runtime)"
+  ok "node >= 22 (directly or via nvm; found automatically at runtime)"
 else
-  missing "node >= 20 — required for the openspec CLI (e.g. 'nvm install 20')"
+  missing "node >= 22 — required for the openspec CLI and react test toolchain (e.g. 'nvm install 24')"
 fi
 
 command -v python3 >/dev/null 2>&1 && ok "python3 (used by the generated Claude hooks)" || missing "python3 — required by the generated Claude hooks"
+
+if command -v rails >/dev/null 2>&1; then
+  ok "rails ($(rails --version 2>/dev/null || echo version unknown); the active ruby is used at runtime)"
+else
+  echo "  [warn]    rails not found for the active ruby — needed only for 'create-claude-project rails'/'react-rails' ('gem install rails')"
+fi
+
+if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
+  ok "bun (react apps are scaffolded and managed with bun)"
+else
+  echo "  [warn]    bun not found — needed for 'create-claude-project react'/'react-rails' (curl -fsSL https://bun.sh/install | bash)"
+fi
+
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  ok "docker + compose (Dockerized dev environments for generated apps)"
+else
+  echo "  [warn]    docker with the compose plugin not found — generated apps default to Dockerized dev (postgres/redis in containers); use --skip-docker without it"
+fi
 
 if command -v gh >/dev/null 2>&1; then
   if gh auth status >/dev/null 2>&1; then

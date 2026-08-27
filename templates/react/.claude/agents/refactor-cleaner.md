@@ -13,10 +13,10 @@ consolidation: dead code, duplicates, and unused exports/dependencies.
 ## Detection Commands
 
 ```bash
-npx knip          # unused files, exports, dependencies
-npx depcheck      # unused npm dependencies
-npx ts-prune      # unused TypeScript exports
-npx eslint . --report-unused-disable-directives
+bunx knip          # unused files, exports, dependencies
+bunx depcheck      # unused dependencies
+bunx ts-prune      # unused TypeScript exports
+bunx eslint . --report-unused-disable-directives
 ```
 
 ## Workflow

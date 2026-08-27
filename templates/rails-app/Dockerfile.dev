@@ -1,0 +1,22 @@
+# Development image. The source tree is bind-mounted and gems live in a
+# named volume (see docker-compose.yml), so this is only the toolchain layer:
+# ruby matching the version the app was generated with, and the system
+# libraries gems compile against (libpq for pg). Tailwind needs no node
+# (tailwindcss-rails ships a standalone binary); node + yarn are included
+# only for projects generated with explicit jsbundling/cssbundling flags —
+# nothing is needed on the host machine.
+FROM ruby:{{RUBY_VERSION}}
+
+ARG NODE_MAJOR={{NODE_MAJOR}}
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+      build-essential git libpq-dev libyaml-dev pkg-config postgresql-client curl && \
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm install -g yarn && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+EXPOSE 3000
+CMD ["bin/dev"]
